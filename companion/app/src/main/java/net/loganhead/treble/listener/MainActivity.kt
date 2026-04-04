@@ -2,6 +2,7 @@ package net.loganhead.treble.listener
 
 import android.content.BroadcastReceiver
 import android.content.Context
+import android.content.Intent
 import android.content.IntentFilter
 import android.os.Build
 import android.os.Bundle
@@ -18,7 +19,9 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
+import androidx.core.content.ContextCompat
 import com.getpebble.android.kit.PebbleKit
+import com.getpebble.android.kit.Constants
 import com.getpebble.android.kit.util.PebbleDictionary
 import net.loganhead.treble.listener.ui.theme.TrebleListenerTheme
 import java.util.UUID
@@ -47,6 +50,9 @@ class MainActivity : ComponentActivity() {
 
         logMessages.add("Ready. Press 'Select' on the watch to recognize music.")
 
+        val serviceIntent = Intent(this, TrebleService::class.java)
+        ContextCompat.startForegroundService(this, serviceIntent)
+        
         setContent {
             TrebleListenerTheme {
                 Scaffold(modifier = Modifier.fillMaxSize()) { innerPadding ->
@@ -89,6 +95,7 @@ class MainActivity : ComponentActivity() {
         super.onResume()
         dataReceiver = object : PebbleKit.PebbleDataReceiver(appUuid) {
             override fun receiveData(context: Context, transactionId: Int, dict: PebbleDictionary) {
+                logMessages.add("Received data from watch.")
                 // ALWAYS ACK the message immediately
                 PebbleKit.sendAckToPebble(context, transactionId)
 
@@ -111,12 +118,14 @@ class MainActivity : ComponentActivity() {
         
         // Manual registration to support Android 14+ (RECEIVER_EXPORTED)
         // because PebbleKit 4.0.1 does not specify it internally.
-        val filter = IntentFilter("com.getpebble.android.kit.action.RECEIVE_DATA")
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            registerReceiver(dataReceiver, filter, Context.RECEIVER_EXPORTED)
-        } else {
-            registerReceiver(dataReceiver, filter)
-        }
+        val filter = IntentFilter(Constants.INTENT_APP_RECEIVE)
+
+        ContextCompat.registerReceiver(
+            this,
+            dataReceiver,
+            filter,
+            ContextCompat.RECEIVER_EXPORTED
+        )
     }
 
     override fun onPause() {
