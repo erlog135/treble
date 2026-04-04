@@ -40,6 +40,8 @@ android {
 }
 
 dependencies {
+    implementation("com.getpebble:pebblekit:4.0.1")
+
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.lifecycle.runtime.ktx)
     implementation(libs.androidx.activity.compose)

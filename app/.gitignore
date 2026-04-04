@@ -1,0 +1,11 @@
+build/
+cmake-build-debug/
+sdk-include/
+.lock-waf*
+*.pyc
+
+node_modules/
+package-lock.json
+
+screenshots/
+pebble_screenshot_*
