@@ -17,6 +17,11 @@ import androidx.core.content.ContextCompat
 import com.getpebble.android.kit.Constants
 import com.getpebble.android.kit.PebbleKit
 import com.getpebble.android.kit.util.PebbleDictionary
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.launch
 import java.util.UUID
 
 class TrebleService : Service() {
@@ -25,13 +30,17 @@ class TrebleService : Service() {
     private var dataReceiver: BroadcastReceiver? = null
     private val channelId = "treble_service_channel"
 
+    // Scope for background Shazam requests
+    private val serviceScope = CoroutineScope(Dispatchers.Main + SupervisorJob())
+    private lateinit var shazamManager: ShazamManager
+
     override fun onCreate() {
         super.onCreate()
 
-        // 1. Create the Notification Channel
-        createNotificationChannel()
+        shazamManager = ShazamManager(this)
 
-        // 2. Build the Notification
+        // 1. Create the Notification Channel & Notification
+        createNotificationChannel()
         val notification: Notification = NotificationCompat.Builder(this, channelId)
             .setContentTitle("Treble is Listening")
             .setContentText("Ready for watch commands")
@@ -40,7 +49,7 @@ class TrebleService : Service() {
             .setPriority(NotificationCompat.PRIORITY_LOW)
             .build()
 
-        // 3. Start Foreground
+        // 2. Start Foreground
         val foregroundType = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
             ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE
         } else {
@@ -48,23 +57,17 @@ class TrebleService : Service() {
         }
 
         try {
-            ServiceCompat.startForeground(
-                this,
-                1,
-                notification,
-                foregroundType
-            )
+            ServiceCompat.startForeground(this, 1, notification, foregroundType)
         } catch (e: Exception) {
             e.printStackTrace()
         }
 
-        // 4. Register the Pebble Broadcast Receiver
+        // 3. Register the Pebble Broadcast Receiver
         dataReceiver = object : PebbleKit.PebbleDataReceiver(appUuid) {
             override fun receiveData(context: Context, transactionId: Int, dict: PebbleDictionary) {
                 PebbleKit.sendAckToPebble(context, transactionId)
 
-                // KEY_COMMAND = 0
-                val commandValue = dict.getInteger(0)
+                val commandValue = dict.getInteger(0) // KEY_COMMAND
                 if (commandValue != null && commandValue.toInt() == 1) { // CMD_START_RECOGNITION
                     handleRecognitionRequest()
                 }
@@ -72,43 +75,63 @@ class TrebleService : Service() {
         }
 
         val filter = IntentFilter(Constants.INTENT_APP_RECEIVE)
-
         ContextCompat.registerReceiver(
             this,
             dataReceiver,
             filter,
             ContextCompat.RECEIVER_EXPORTED
         )
+
+        sendLogToActivity("Service started and listening to Pebble.")
+    }
+
+    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        // Triggered by the "Force Service to Listen" button in the UI
+        if (intent?.action == "ACTION_FORCE_RECOGNIZE") {
+            handleRecognitionRequest()
+        }
+        return START_STICKY
     }
 
     private fun handleRecognitionRequest() {
-        try {
-            // TODO: Start actual Microphone / Recognition logic here.
-            sendRecognitionResult(isSuccess = true)
-        } catch (e: SecurityException) {
-            sendRecognitionResult(isSuccess = false)
+        sendLogToActivity("Recognition requested. Listening...")
+
+        serviceScope.launch {
+            val result = shazamManager.recognizeMusic()
+            if (result.isSuccess) {
+                sendLogToActivity("Found: ${result.title} by ${result.artist}")
+                sendRecognitionResult(true, result.title, result.artist)
+            } else {
+                sendLogToActivity("Failed: ${result.error}")
+                sendRecognitionResult(false)
+            }
         }
     }
 
-    private fun sendRecognitionResult(isSuccess: Boolean) {
+    private fun sendRecognitionResult(isSuccess: Boolean, title: String = "", artist: String = "") {
         val dict = PebbleDictionary()
         if (isSuccess) {
             dict.addInt32(1, 1) // KEY_RESPONSE_RESULT = RES_SUCCESS
-            dict.addString(2, "Sandstorm") // KEY_SONG_TITLE
-            dict.addString(3, "Darude") // KEY_SONG_ARTIST
+            dict.addString(2, title) // KEY_SONG_TITLE
+            dict.addString(3, artist) // KEY_SONG_ARTIST
         } else {
             dict.addInt32(1, 0) // KEY_RESPONSE_RESULT = RES_FAILED
         }
         PebbleKit.sendDataToPebble(this, appUuid, dict)
     }
 
-    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        return START_STICKY
+    // Helper to pipe logs back to the MainActivity UI
+    private fun sendLogToActivity(message: String) {
+        val intent = Intent("net.loganhead.treble.LOG_EVENT")
+        intent.putExtra("message", message)
+        intent.setPackage(packageName)
+        sendBroadcast(intent)
     }
 
     override fun onDestroy() {
         super.onDestroy()
         dataReceiver?.let { unregisterReceiver(it) }
+        serviceScope.cancel() // Stop any running Shazam requests
     }
 
     override fun onBind(intent: Intent?): IBinder? = null

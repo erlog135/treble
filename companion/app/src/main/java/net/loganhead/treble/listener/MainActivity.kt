@@ -1,5 +1,6 @@
 package net.loganhead.treble.listener
 
+import android.Manifest
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
@@ -9,6 +10,7 @@ import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -21,45 +23,63 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import com.getpebble.android.kit.PebbleKit
-import com.getpebble.android.kit.Constants
-import com.getpebble.android.kit.util.PebbleDictionary
 import net.loganhead.treble.listener.ui.theme.TrebleListenerTheme
 import java.util.UUID
 
 class MainActivity : ComponentActivity() {
 
     private val appUuid = UUID.fromString("c49abd69-dd2c-4655-a7ce-ec7da67aa930")
-
-    // Keys matching package.json
-    private val KEY_COMMAND = 0
-    private val KEY_RESPONSE_RESULT = 1
-    private val KEY_SONG_TITLE = 2
-    private val KEY_SONG_ARTIST = 3
-
-    // Commands & Results
-    private val CMD_START_RECOGNITION = 1
-    private val RES_SUCCESS = 1
-    private val RES_FAILED = 0
-
     private val logMessages = mutableStateListOf<String>()
-    private var dataReceiver: BroadcastReceiver? = null
+
+    // Broadcast receiver to get logs from the TrebleService
+    private val logReceiver = object : BroadcastReceiver() {
+        override fun onReceive(context: Context, intent: Intent) {
+            val message = intent.getStringExtra("message")
+            if (message != null) {
+                logMessages.add(message)
+            }
+        }
+    }
+
+    private val requestPermissionsLauncher = registerForActivityResult(
+        ActivityResultContracts.RequestMultiplePermissions()
+    ) { permissions ->
+        val micGranted = permissions[Manifest.permission.RECORD_AUDIO] ?: false
+        if (micGranted) {
+            logMessages.add("Permissions granted. Starting Service...")
+            startTrebleService()
+        } else {
+            logMessages.add("Error: Mic permission denied. Service cannot run.")
+        }
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
 
-        logMessages.add("Ready. Press 'Select' on the watch to recognize music.")
+        logMessages.add("Checking permissions...")
 
-        val serviceIntent = Intent(this, TrebleService::class.java)
-        ContextCompat.startForegroundService(this, serviceIntent)
-        
+        val shazamManager = ShazamManager(this)
+
+        // Define required permissions (Notification permission needed for Android 13+)
+        val requiredPermissions = mutableListOf(Manifest.permission.RECORD_AUDIO)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            requiredPermissions.add(Manifest.permission.POST_NOTIFICATIONS)
+        }
+
+        if (!shazamManager.hasMicrophonePermission()) {
+            requestPermissionsLauncher.launch(requiredPermissions.toTypedArray())
+        } else {
+            startTrebleService()
+        }
+
         setContent {
             TrebleListenerTheme {
                 Scaffold(modifier = Modifier.fillMaxSize()) { innerPadding ->
                     TrebleScreen(
                         logMessages = logMessages,
-                        onSimulateClicked = { sendRecognitionResult(true) }, // For manual testing
                         onLaunchClicked = { launchWatchApp() },
+                        onSimulateClicked = { forceServiceToListen() },
                         modifier = Modifier.padding(innerPadding)
                     )
                 }
@@ -67,70 +87,38 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    private fun launchWatchApp() {
-
-        // Sends the command to the Pebble app on your phone to open your watchapp
-        PebbleKit.startAppOnPebble(this, appUuid)
-        logMessages.add("Command sent to open watchapp.")
-    }
-
-    private fun sendRecognitionResult(isSuccess: Boolean) {
-
-        val dict = PebbleDictionary()
-
-        if (isSuccess) {
-            dict.addInt32(KEY_RESPONSE_RESULT, RES_SUCCESS)
-            dict.addString(KEY_SONG_TITLE, "Sandstorm")
-            dict.addString(KEY_SONG_ARTIST, "Darude")
-            logMessages.add("Sent result: Success (Sandstorm - Darude)")
-        } else {
-            dict.addInt32(KEY_RESPONSE_RESULT, RES_FAILED)
-            logMessages.add("Sent result: Failed to recognize.")
-        }
-
-        PebbleKit.sendDataToPebble(this, appUuid, dict)
-    }
-
     override fun onResume() {
         super.onResume()
-        dataReceiver = object : PebbleKit.PebbleDataReceiver(appUuid) {
-            override fun receiveData(context: Context, transactionId: Int, dict: PebbleDictionary) {
-                logMessages.add("Received data from watch.")
-                // ALWAYS ACK the message immediately
-                PebbleKit.sendAckToPebble(context, transactionId)
-
-                // Check if the watch sent a command
-                val commandValue = dict.getInteger(KEY_COMMAND)
-                if (commandValue != null) {
-                    when (commandValue.toInt()) {
-                        CMD_START_RECOGNITION -> {
-                            logMessages.add("Watch requested music recognition. Processing...")
-
-                            // TODO: Call your actual microphone/recognition API here.
-                            // For now, we simulate a successful hit immediately:
-                            sendRecognitionResult(true)
-                        }
-                        else -> logMessages.add("Received unknown command: $commandValue")
-                    }
-                }
-            }
-        }
-        
-        // Manual registration to support Android 14+ (RECEIVER_EXPORTED)
-        // because PebbleKit 4.0.1 does not specify it internally.
-        val filter = IntentFilter(Constants.INTENT_APP_RECEIVE)
-
+        // Register the log receiver so the UI updates while the app is open
+        val filter = IntentFilter("net.loganhead.treble.LOG_EVENT")
         ContextCompat.registerReceiver(
             this,
-            dataReceiver,
+            logReceiver,
             filter,
-            ContextCompat.RECEIVER_EXPORTED
+            ContextCompat.RECEIVER_NOT_EXPORTED // Securely listen only to our own app
         )
     }
 
     override fun onPause() {
         super.onPause()
-        dataReceiver?.let { unregisterReceiver(it) }
+        unregisterReceiver(logReceiver)
+    }
+
+    private fun startTrebleService() {
+        val serviceIntent = Intent(this, TrebleService::class.java)
+        ContextCompat.startForegroundService(this, serviceIntent)
+    }
+
+    private fun launchWatchApp() {
+        PebbleKit.startAppOnPebble(this, appUuid)
+        logMessages.add("Command sent to open watchapp.")
+    }
+
+    private fun forceServiceToListen() {
+        val intent = Intent(this, TrebleService::class.java).apply {
+            action = "ACTION_FORCE_RECOGNIZE"
+        }
+        startService(intent)
     }
 }
 
@@ -157,7 +145,7 @@ fun TrebleScreen(
             onClick = onSimulateClicked,
             modifier = Modifier.fillMaxWidth()
         ) {
-            Text("Simulate Successful Recognition")
+            Text("Force Service to Listen (Test)")
         }
 
         Spacer(modifier = Modifier.height(16.dp))
