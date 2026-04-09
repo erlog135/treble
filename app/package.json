@@ -20,7 +20,23 @@
       "dummy"
     ],
     "resources": {
-      "media": []
+      "media": [
+        {
+          "type": "raw",
+          "name": "SONG_LOOK_SEQUENCE",
+          "file": "sequences/SongLook.pdcs"
+        },
+        {
+          "type": "raw",
+          "name": "SONG_FOCUS_SEQUENCE",
+          "file": "sequences/SongFocus.pdcs"
+        },
+        {
+          "type": "raw",
+          "name": "SONG_FIND_SEQUENCE",
+          "file": "sequences/SongFind.pdcs"
+        }
+      ]
     }
   }
 }
