@@ -17,6 +17,7 @@
 
 static Window *s_main_window;
 static TextLayer *s_prompt_layer;
+static StatusBarLayer *s_status_bar;
 
 #ifdef DEMO_MODE
 static AppTimer *s_demo_timer;
@@ -24,6 +25,9 @@ static AppTimer *s_demo_timer;
 static void demo_timer_callback(void *context) {
   s_demo_timer = NULL;
   listen_window_on_result("Sandstorm", "Darude");
+  // listen_window_on_result("Super Duper Long Song Name I Wonder How This Will Wrap", "Darude");
+  // listen_window_on_result("Sandstorm", "Super Duper Long Artist Name I Wonder How This Will Wrap");
+  // listen_window_on_result("Super Duper Long Song Name I Wonder How This Will Wrap", "Super Duper Long Artist Name I Wonder How This Will Wrap");
 }
 #endif
 
@@ -33,7 +37,7 @@ static void send_recognition_request() {
   if (s_demo_timer) {
     app_timer_cancel(s_demo_timer);
   }
-  s_demo_timer = app_timer_register(5000, demo_timer_callback, NULL);
+  s_demo_timer = app_timer_register(1000, demo_timer_callback, NULL);
 #else
   DictionaryIterator *iter;
   app_message_outbox_begin(&iter);
@@ -91,13 +95,25 @@ static void main_window_load(Window *window) {
   Layer *window_layer = window_get_root_layer(window);
   GRect bounds = layer_get_bounds(window_layer);
 
-  s_prompt_layer = text_layer_create(GRect(0, bounds.size.h / 2 - 15, bounds.size.w, 30));
+  s_status_bar = status_bar_layer_create();
+  status_bar_layer_set_colors(s_status_bar,
+    PBL_IF_COLOR_ELSE(GColorFolly, GColorWhite),
+    PBL_IF_COLOR_ELSE(GColorWhite, GColorBlack));
+  layer_add_child(window_layer, status_bar_layer_get_layer(s_status_bar));
+
+  int content_top = STATUS_BAR_LAYER_HEIGHT;
+  int content_height = bounds.size.h - content_top;
+
+  s_prompt_layer = text_layer_create(GRect(0, content_top + content_height / 2 - 15, bounds.size.w, 30));
   text_layer_set_text(s_prompt_layer, "Press SELECT to tag");
   text_layer_set_text_alignment(s_prompt_layer, GTextAlignmentCenter);
+  text_layer_set_text_color(s_prompt_layer, PBL_IF_COLOR_ELSE(GColorWhite, GColorBlack));
+  text_layer_set_background_color(s_prompt_layer, GColorClear);
   layer_add_child(window_layer, text_layer_get_layer(s_prompt_layer));
 }
 
 static void main_window_unload(Window *window) {
+  status_bar_layer_destroy(s_status_bar);
   text_layer_destroy(s_prompt_layer);
 }
 
@@ -111,6 +127,7 @@ static void init() {
   });
 
   window_set_click_config_provider(s_main_window, click_config_provider);
+  window_set_background_color(s_main_window, PBL_IF_COLOR_ELSE(GColorFolly, GColorWhite));
   window_stack_push(s_main_window, true);
 
   app_message_register_inbox_received(inbox_received_callback);

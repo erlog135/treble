@@ -1,5 +1,15 @@
 #include "listen_graphic.h"
 
+#define FIND_TEXT_TRIGGER_FRAME 14
+
+// Graphic canvas dimensions (matches the PDC animation assets)
+#define GRAPHIC_WIDTH  150
+#define GRAPHIC_HEIGHT 100
+
+// The graphic's vertical center is placed at (window_height / GRAPHIC_CENTER_DIVISOR),
+// keeping it in the top third of the window for an uncluttered look.
+#define GRAPHIC_CENTER_DIVISOR 3
+
 typedef enum {
   STATE_IDLE,
   STATE_LOOKING,
@@ -14,8 +24,26 @@ static GDrawCommandSequence *s_current_seq;
 static AppTimer *s_timer;
 static int s_frame_index;
 static GraphicState s_state;
+static ListenGraphicStateCallback s_state_callback;
 
 static void schedule_next_timer(void);
+
+static void notify_state_change(GraphicState state) {
+  if (!s_state_callback) return;
+  switch (state) {
+    case STATE_LOOKING:
+      s_state_callback(LISTEN_GRAPHIC_STATE_LOOKING);
+      break;
+    case STATE_FOCUSING:
+      s_state_callback(LISTEN_GRAPHIC_STATE_FOCUSING);
+      break;
+    case STATE_FINDING:
+      // Deferred: fired from next_frame_handler at FIND_TEXT_TRIGGER_FRAME
+      break;
+    default:
+      break;
+  }
+}
 
 static void transition_to_sequence(uint32_t resource_id, GraphicState new_state) {
   if (s_current_seq) {
@@ -24,6 +52,7 @@ static void transition_to_sequence(uint32_t resource_id, GraphicState new_state)
   s_current_seq = gdraw_command_sequence_create_with_resource(resource_id);
   s_frame_index = 0;
   s_state = new_state;
+  notify_state_change(new_state);
   layer_mark_dirty(s_canvas_layer);
   schedule_next_timer();
 }
@@ -31,6 +60,10 @@ static void transition_to_sequence(uint32_t resource_id, GraphicState new_state)
 static void next_frame_handler(void *context) {
   s_timer = NULL;
   s_frame_index++;
+
+  if (s_state == STATE_FINDING && s_frame_index == FIND_TEXT_TRIGGER_FRAME && s_state_callback) {
+    s_state_callback(LISTEN_GRAPHIC_STATE_FINDING);
+  }
 
   int num_frames = gdraw_command_sequence_get_num_frames(s_current_seq);
 
@@ -80,7 +113,15 @@ static void update_proc(Layer *layer, GContext *ctx) {
 }
 
 void listen_graphic_create(Layer *parent_layer) {
-  s_canvas_layer = layer_create(GRect(0, 0, 150, 100));
+  GRect bounds = layer_get_bounds(parent_layer);
+
+  // Place the graphic's vertical center at 1/GRAPHIC_CENTER_DIVISOR of the window height.
+  // Horizontally center it when the window is wider than the graphic.
+  int graphic_center_y = bounds.size.h / GRAPHIC_CENTER_DIVISOR + STATUS_BAR_LAYER_HEIGHT / 2;
+  int graphic_y = graphic_center_y - GRAPHIC_HEIGHT / 2;
+  int graphic_x = (bounds.size.w > GRAPHIC_WIDTH) ? (bounds.size.w - GRAPHIC_WIDTH) / 2 : 0;
+
+  s_canvas_layer = layer_create(GRect(graphic_x, graphic_y, GRAPHIC_WIDTH, GRAPHIC_HEIGHT));
   layer_set_update_proc(s_canvas_layer, update_proc);
   layer_add_child(parent_layer, s_canvas_layer);
 
@@ -88,6 +129,7 @@ void listen_graphic_create(Layer *parent_layer) {
   s_timer = NULL;
   s_frame_index = 0;
   s_state = STATE_IDLE;
+  s_state_callback = NULL;
 }
 
 void listen_graphic_destroy(void) {
@@ -104,6 +146,7 @@ void listen_graphic_destroy(void) {
     s_canvas_layer = NULL;
   }
   s_state = STATE_IDLE;
+  s_state_callback = NULL;
 }
 
 void listen_graphic_start(void) {
@@ -114,4 +157,8 @@ void listen_graphic_on_song_found(void) {
   if (s_state == STATE_LOOKING) {
     s_state = STATE_WAITING_FOR_WRAP;
   }
+}
+
+void listen_graphic_set_state_callback(ListenGraphicStateCallback callback) {
+  s_state_callback = callback;
 }

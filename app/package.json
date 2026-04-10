@@ -11,7 +11,9 @@
     "sdkVersion": "3",
     "enableMultiJS": true,
     "targetPlatforms": [
-      "aplite"
+      "aplite",
+      "basalt",
+      "emery"
     ],
     "watchapp": {
       "watchface": false
