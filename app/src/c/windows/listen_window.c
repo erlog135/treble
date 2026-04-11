@@ -5,7 +5,7 @@
 #if defined(PBL_PLATFORM_EMERY) || defined(PBL_PLATFORM_GABBRO)
   #define STATUS_FONT_KEY   FONT_KEY_GOTHIC_28_BOLD
   #define STATUS_FONT_LINE_H 28
-  #define BOTTOM_TEXT_MARGIN 18
+  #define BOTTOM_TEXT_MARGIN 24
 #else
   #define STATUS_FONT_KEY   FONT_KEY_GOTHIC_24_BOLD
   #define STATUS_FONT_LINE_H 24
@@ -14,10 +14,15 @@
 
 #define ARTIST_FONT_LINE_H 18  // FONT_KEY_GOTHIC_18_BOLD
 
-// Distance from the bottom of the window to the bottom of the lowest text layer
-
 // Extra height added to every text layer to prevent descender clipping
 #define TEXT_LAYER_PADDING 4
+
+// Margins around the result text block.
+// Round watches need larger insets because the screen is circular; the artist
+// sits lower than the title so it needs an even wider margin to clear the contour.
+#define RESULT_TITLE_SIDE_MARGIN  PBL_IF_ROUND_ELSE(20, 4)
+#define RESULT_ARTIST_SIDE_MARGIN PBL_IF_ROUND_ELSE(40, 4)
+#define RESULT_BOTTOM_MARGIN      PBL_IF_ROUND_ELSE(10, 0)
 
 static Window *s_listen_window;
 static StatusBarLayer *s_listen_status_bar;
@@ -41,10 +46,8 @@ AnimationProgress animation_back_out_overshoot_curve(AnimationProgress linear_di
   return (AnimationProgress)(result * ANIMATION_NORMALIZED_MAX);
 }
 
-// artist_lines: 1 or 2. On Emery/Gabbro the artist always respects the bottom
-// margin. On other platforms a 2-line artist is allowed to sit flush with the
-// window edge to give the extra line room.
-static void animate_result_layers(int artist_lines) {
+// Center the title+artist block in the space below the graphic's active area.
+static void animate_result_layers(void) {
   if (s_title_anim) {
     property_animation_destroy(s_title_anim);
     s_title_anim = NULL;
@@ -57,19 +60,24 @@ static void animate_result_layers(int artist_lines) {
   Layer *title_layer  = text_layer_get_layer(s_status_layer);
   Layer *artist_layer = text_layer_get_layer(s_listen_artist_layer);
 
-  GRect title_from = layer_get_frame(title_layer);
-  int16_t title_h  = title_from.size.h;
-  int16_t artist_h = layer_get_frame(artist_layer).size.h;
+  // x, w, and h for each layer were already set by the FINDING case
+  GRect title_from  = layer_get_frame(title_layer);
+  GRect artist_cur  = layer_get_frame(artist_layer);
+  int16_t title_h   = title_from.size.h;
+  int16_t artist_h  = artist_cur.size.h;
+  int16_t artist_x  = artist_cur.origin.x;
+  int16_t artist_w  = artist_cur.size.w;
 
-#if defined(PBL_PLATFORM_EMERY) || defined(PBL_PLATFORM_GABBRO)
-  int16_t artist_margin = BOTTOM_TEXT_MARGIN;
-#else
-  int16_t artist_margin = (artist_lines == 2) ? 0 : BOTTOM_TEXT_MARGIN;
-#endif
+  // Center the text block in the space below the graphic's active content,
+  // leaving RESULT_BOTTOM_MARGIN clearance at the window bottom.
+  GRect graphic_frame = layer_get_frame(listen_graphic_get_layer());
+  int16_t space_top    = graphic_frame.origin.y + GRAPHIC_ACTIVE_HEIGHT;
+  int16_t available_h  = s_window_bounds.size.h - space_top - RESULT_BOTTOM_MARGIN;
+  int16_t text_block_y = space_top + (available_h - title_h - artist_h) / 2;
 
-  GRect artist_from = GRect(0, s_window_bounds.size.h,                          s_window_bounds.size.w, artist_h);
-  GRect artist_to   = GRect(0, s_window_bounds.size.h - artist_h - artist_margin, s_window_bounds.size.w, artist_h);
-  GRect title_to    = GRect(0, artist_to.origin.y - title_h + TEXT_LAYER_PADDING,                   s_window_bounds.size.w, title_h);
+  GRect artist_from = GRect(artist_x, s_window_bounds.size.h - BOTTOM_TEXT_MARGIN,  artist_w, artist_h);
+  GRect title_to    = GRect(title_from.origin.x, text_block_y, title_from.size.w, title_h);
+  GRect artist_to   = GRect(artist_x, text_block_y + title_h - TEXT_LAYER_PADDING,  artist_w, artist_h);
 
   layer_set_frame(artist_layer, artist_from);
 
@@ -112,22 +120,37 @@ static void on_graphic_state(ListenGraphicState state) {
       GRect title_cur = layer_get_frame(title_l);
       int16_t title_bottom = title_cur.origin.y + title_cur.size.h;
 
+      int16_t title_x = RESULT_TITLE_SIDE_MARGIN;
+      int16_t title_w = w - 2 * RESULT_TITLE_SIDE_MARGIN;
+
       text_layer_set_text(s_status_layer, s_title_buffer);
-      // Give it a 2-line frame so text can wrap, then read content height
-      layer_set_frame(title_l, GRect(0, 0, w, STATUS_FONT_LINE_H * 2 + TEXT_LAYER_PADDING));
+      layer_set_frame(title_l, GRect(title_x, 0, title_w, STATUS_FONT_LINE_H * 2 + TEXT_LAYER_PADDING));
       int title_lines = (text_layer_get_content_size(s_status_layer).h > STATUS_FONT_LINE_H) ? 2 : 1;
       int16_t title_h = STATUS_FONT_LINE_H * title_lines + TEXT_LAYER_PADDING;
-      layer_set_frame(title_l, GRect(0, title_bottom - title_h, w, title_h));
+      layer_set_frame(title_l, GRect(title_x, title_bottom - title_h, title_w, title_h));
 
       // --- Size the artist layer ---
+      // Detect wrapping at title-width first, then pick the effective margin:
+      //   both 1-line  → title margin
+      //   either 2-line → midpoint
+      //   both 2-line  → full artist margin
       Layer *artist_l = text_layer_get_layer(s_listen_artist_layer);
-      // Artist starts off-screen; position doesn't matter here, animate_result_layers sets it
-      layer_set_frame(artist_l, GRect(0, 0, w, ARTIST_FONT_LINE_H * 2 + TEXT_LAYER_PADDING));
+      layer_set_frame(artist_l, GRect(title_x, 0, title_w, ARTIST_FONT_LINE_H * 2 + TEXT_LAYER_PADDING));
       int artist_lines = (text_layer_get_content_size(s_listen_artist_layer).h > ARTIST_FONT_LINE_H) ? 2 : 1;
-      int16_t artist_h = ARTIST_FONT_LINE_H * artist_lines + TEXT_LAYER_PADDING;
-      layer_set_frame(artist_l, GRect(0, h, w, artist_h));
 
-      animate_result_layers(artist_lines);
+      int16_t artist_x;
+      if (title_lines == 1 && artist_lines == 1) {
+        artist_x = RESULT_TITLE_SIDE_MARGIN;
+      } else if (title_lines == 2 && artist_lines == 2) {
+        artist_x = RESULT_ARTIST_SIDE_MARGIN;
+      } else {
+        artist_x = (RESULT_TITLE_SIDE_MARGIN + RESULT_ARTIST_SIDE_MARGIN) / 2;
+      }
+      int16_t artist_w = w - 2 * artist_x;
+      int16_t artist_h = ARTIST_FONT_LINE_H * artist_lines + TEXT_LAYER_PADDING;
+      layer_set_frame(artist_l, GRect(artist_x, h, artist_w, artist_h));
+
+      animate_result_layers();
       break;
     }
   }

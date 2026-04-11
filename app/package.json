@@ -13,7 +13,9 @@
     "targetPlatforms": [
       "aplite",
       "basalt",
-      "emery"
+      "chalk",
+      "emery",
+      "gabbro"
     ],
     "watchapp": {
       "watchface": false

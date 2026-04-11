@@ -162,3 +162,7 @@ void listen_graphic_on_song_found(void) {
 void listen_graphic_set_state_callback(ListenGraphicStateCallback callback) {
   s_state_callback = callback;
 }
+
+Layer *listen_graphic_get_layer(void) {
+  return s_canvas_layer;
+}
