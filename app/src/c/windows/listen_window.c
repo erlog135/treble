@@ -6,11 +6,11 @@
 #if defined(PBL_PLATFORM_EMERY) || defined(PBL_PLATFORM_GABBRO)
   #define STATUS_FONT_KEY   FONT_KEY_GOTHIC_28_BOLD
   #define STATUS_FONT_LINE_H 28
-  #define BOTTOM_TEXT_MARGIN 24
+  #define BOTTOM_TEXT_MARGIN PBL_IF_ROUND_ELSE(36, 24)
 #else
   #define STATUS_FONT_KEY   FONT_KEY_GOTHIC_24_BOLD
   #define STATUS_FONT_LINE_H 24
-  #define BOTTOM_TEXT_MARGIN 12
+  #define BOTTOM_TEXT_MARGIN PBL_IF_ROUND_ELSE(24, 12)
 #endif
 
 #define ARTIST_FONT_LINE_H 18  // FONT_KEY_GOTHIC_18_BOLD
@@ -164,7 +164,7 @@ static void listen_window_load(Window *window) {
 
   s_listen_status_bar = status_bar_layer_create();
   status_bar_layer_set_colors(s_listen_status_bar,
-    PBL_IF_COLOR_ELSE(GColorSunsetOrange, GColorWhite),
+    PBL_IF_COLOR_ELSE(GColorOrange, GColorWhite),
     PBL_IF_COLOR_ELSE(GColorWhite, GColorBlack));
   layer_add_child(window_layer, status_bar_layer_get_layer(s_listen_status_bar));
 
@@ -213,7 +213,7 @@ static void listen_window_unload(Window *window) {
 void push_listen_window(void) {
   if (!s_listen_window) {
     s_listen_window = window_create();
-    window_set_background_color(s_listen_window, PBL_IF_COLOR_ELSE(GColorSunsetOrange, GColorWhite));
+    window_set_background_color(s_listen_window, PBL_IF_COLOR_ELSE(GColorOrange, GColorWhite));
     window_set_window_handlers(s_listen_window, (WindowHandlers) {
       .load = listen_window_load,
       .unload = listen_window_unload,

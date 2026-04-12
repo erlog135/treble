@@ -14,6 +14,7 @@
       "aplite",
       "basalt",
       "chalk",
+      "diorite",
       "emery",
       "gabbro"
     ],
@@ -39,6 +40,16 @@
           "type": "raw",
           "name": "SONG_FIND_SEQUENCE",
           "file": "sequences/SongFind.pdcs"
+        },
+        {
+          "type": "raw",
+          "name": "SONG_NOT_FOUND_SEQUENCE",
+          "file": "sequences/Spider.pdcs"
+        },
+        {
+          "type": "raw",
+          "name": "SONG_NOT_FOUND",
+          "file": "Spider.pdc"
         },
         {
           "type": "raw",

@@ -38,13 +38,20 @@ static GBitmap *s_icon_start;
 
 #ifdef DEMO_MODE
 static AppTimer *s_demo_timer;
+static bool s_demo_force_not_found;
 
 static void demo_timer_callback(void *context) {
   s_demo_timer = NULL;
-  listen_window_on_result("Sandstorm", "Darude");
+  if (s_demo_force_not_found) {
+    s_demo_force_not_found = false;
+    listen_window_on_not_found();
+    return;
+  }
+
+  // listen_window_on_result("Sandstorm", "Darude");
   // listen_window_on_result("Super Duper Long Song Name I Wonder How This Will Wrap", "Darude");
   // listen_window_on_result("Sandstorm", "Super Duper Long Artist Name I Wonder How This Will Wrap");
-  // listen_window_on_result("Super Duper Long Song Name I Wonder How This Will Wrap", "Super Duper Long Artist Name I Wonder How This Will Wrap");
+  listen_window_on_result("Super Duper Long Song Name I Wonder How This Will Wrap", "Super Duper Long Artist Name I Wonder How This Will Wrap");
 }
 #endif
 
@@ -108,9 +115,21 @@ static void select_click_handler(ClickRecognizerRef recognizer, void *context) {
   send_recognition_request();
 }
 
+#ifdef DEMO_MODE
+static void down_click_handler(ClickRecognizerRef recognizer, void *context) {
+  // In demo mode, DOWN intentionally triggers not-found.
+  s_demo_force_not_found = true;
+  push_listen_window();
+  send_recognition_request();
+}
+#endif
+
 static void click_config_provider(void *context) {
   window_single_click_subscribe(BUTTON_ID_UP,     up_click_handler);
   window_single_click_subscribe(BUTTON_ID_SELECT, select_click_handler);
+#ifdef DEMO_MODE
+  window_single_click_subscribe(BUTTON_ID_DOWN,   down_click_handler);
+#endif
 }
 
 static void pdc_layer_update_proc(Layer *layer, GContext *ctx) {
