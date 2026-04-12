@@ -39,6 +39,26 @@
           "type": "raw",
           "name": "SONG_FIND_SEQUENCE",
           "file": "sequences/SongFind.pdcs"
+        },
+        {
+          "type": "raw",
+          "name": "GENERIC_WARNING_80PX",
+          "file": "GenericWarning_80px.pdc"
+        },
+        {
+          "type": "raw",
+          "name": "POINT_RIGHT",
+          "file": "PointRight.pdc"
+        },
+        {
+          "type": "bitmap",
+          "name": "ACTION_ICON_HISTORY",
+          "file": "Action_History.png"
+        },
+        {
+          "type": "bitmap",
+          "name": "ACTION_ICON_START",
+          "file": "Action_Start.png"
         }
       ]
     }

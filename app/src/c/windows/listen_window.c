@@ -1,6 +1,7 @@
 #include "listen_window.h"
 #include "listen_graphic.h"
 #include "notfound_window.h"
+#include "../history_store.h"
 
 #if defined(PBL_PLATFORM_EMERY) || defined(PBL_PLATFORM_GABBRO)
   #define STATUS_FONT_KEY   FONT_KEY_GOTHIC_28_BOLD
@@ -222,6 +223,7 @@ void push_listen_window(void) {
 }
 
 void listen_window_on_result(const char *title, const char *artist) {
+  history_store_add(title, artist);
   snprintf(s_title_buffer, sizeof(s_title_buffer), "%s", title);
   snprintf(s_artist_buffer, sizeof(s_artist_buffer), "by %s", artist);
   text_layer_set_text(s_listen_artist_layer, s_artist_buffer);
