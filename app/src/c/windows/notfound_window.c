@@ -100,7 +100,7 @@ static void notfound_window_load(Window *window) {
   int16_t text_h = STATUS_FONT_LINE_H + TEXT_LAYER_PADDING;
   s_notfound_layer = text_layer_create(
       GRect(0, bounds.size.h - text_h - BOTTOM_TEXT_MARGIN, bounds.size.w, text_h));
-  text_layer_set_text(s_notfound_layer, "Not found");
+  text_layer_set_text(s_notfound_layer, "Song not found");
   text_layer_set_text_alignment(s_notfound_layer, GTextAlignmentCenter);
   text_layer_set_font(s_notfound_layer, fonts_get_system_font(STATUS_FONT_KEY));
   text_layer_set_text_color(s_notfound_layer, GColorBlack);
