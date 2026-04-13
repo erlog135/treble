@@ -317,6 +317,12 @@ static void draw_row_callback(GContext *ctx, const Layer *cell_layer,
   }
 }
 
+static void draw_background_callback(GContext *ctx, const Layer *bg_layer,
+                                     bool highlight, void *context) {
+  graphics_context_set_fill_color(ctx, PBL_IF_COLOR_ELSE(GColorLightGray, GColorWhite));
+  graphics_fill_rect(ctx, layer_get_bounds(bg_layer), 0, GCornerNone);
+}
+
 static void selection_changed_callback(MenuLayer *menu_layer, MenuIndex new_index,
                                        MenuIndex old_index, void *context) {
   scroll_reset();
@@ -361,6 +367,7 @@ static void history_window_load(Window *window) {
     .get_header_height = get_header_height_callback,
     .draw_header       = draw_header_callback,
     .draw_row          = draw_row_callback,
+    .draw_background   = draw_background_callback,
     .selection_changed = selection_changed_callback,
   });
 

@@ -1,17 +1,24 @@
 #include <pebble.h>
 #include "windows/listen_window.h"
 #include "windows/history_window.h"
+#include "windows/message_dialog.h"
 
 // App Keys
-#define KEY_COMMAND 0
+#define KEY_COMMAND       0
 #define KEY_RESPONSE_RESULT 1
-#define KEY_SONG_TITLE 2
-#define KEY_SONG_ARTIST 3
+#define KEY_SONG_TITLE    2
+#define KEY_SONG_ARTIST   3
+#define KEY_READY         4
 
 // Command & Result Constants
 #define CMD_START_RECOGNITION 1
-#define RES_SUCCESS 1
-#define RES_FAILED 0
+#define RES_SUCCESS 0
+#define RES_FAILED  1
+
+// Ready State Constants
+#define READY_OK              0
+#define READY_FAILED_NO_APP   1
+#define READY_FAILED_NO_PERMS 2
 
 // Uncomment to simulate a successful recognition after 5 seconds (no phone needed)
 #define DEMO_MODE
@@ -33,8 +40,12 @@ static ActionBarLayer *s_action_bar;
 static TextLayer *s_prompt_layer;
 static Layer *s_pdc_layer;
 static GDrawCommandImage *s_point_right_image;
+static GDrawCommandImage *s_warning_image;
 static GBitmap *s_icon_history;
 static GBitmap *s_icon_start;
+static GBitmap *s_icon_info;
+
+static int s_ready_state = READY_FAILED_NO_APP;
 
 #ifdef DEMO_MODE
 static AppTimer *s_demo_timer;
@@ -76,10 +87,29 @@ static void send_recognition_request() {
 #endif
 }
 
+// --- Apply the current ready state to the main window UI ---
+static void apply_ready_state() {
+  if (!s_pdc_layer || !s_action_bar || !s_prompt_layer) return;
+
+  if (s_ready_state == READY_OK) {
+    text_layer_set_text(s_prompt_layer, "Ready");
+    action_bar_layer_set_icon(s_action_bar, BUTTON_ID_SELECT, s_icon_start);
+  } else {
+    text_layer_set_text(s_prompt_layer, "Fix needed");
+    action_bar_layer_set_icon(s_action_bar, BUTTON_ID_SELECT, s_icon_info);
+  }
+  layer_mark_dirty(s_pdc_layer);
+}
+
 // --- Receiving Data from Android ---
 static void inbox_received_callback(DictionaryIterator *iterator, void *context) {
-  Tuple *result_tuple = dict_find(iterator, KEY_RESPONSE_RESULT);
+  Tuple *ready_tuple = dict_find(iterator, KEY_READY);
+  if (ready_tuple) {
+    s_ready_state = ready_tuple->value->int32;
+    apply_ready_state();
+  }
 
+  Tuple *result_tuple = dict_find(iterator, KEY_RESPONSE_RESULT);
   if (result_tuple) {
     int result = result_tuple->value->int32;
 
@@ -111,6 +141,10 @@ static void up_click_handler(ClickRecognizerRef recognizer, void *context) {
 }
 
 static void select_click_handler(ClickRecognizerRef recognizer, void *context) {
+  if (s_ready_state != READY_OK) {
+    message_dialog_push(s_ready_state);
+    return;
+  }
   push_listen_window();
   send_recognition_request();
 }
@@ -133,8 +167,14 @@ static void click_config_provider(void *context) {
 }
 
 static void pdc_layer_update_proc(Layer *layer, GContext *ctx) {
-  if (s_point_right_image) {
-    gdraw_command_image_draw(ctx, s_point_right_image, GPointZero);
+  if (s_ready_state == READY_OK) {
+    if (s_point_right_image) {
+      gdraw_command_image_draw(ctx, s_point_right_image, GPointZero);
+    }
+  } else {
+    if (s_warning_image) {
+      gdraw_command_image_draw(ctx, s_warning_image, GPointZero);
+    }
   }
 }
 
@@ -149,14 +189,14 @@ static void main_window_load(Window *window) {
     PBL_IF_COLOR_ELSE(GColorWhite, GColorBlack));
   layer_add_child(window_layer, status_bar_layer_get_layer(s_status_bar));
 
-  // Action bar (history at top, start in middle)
+  // Action bar (history at top, start/info in middle)
   s_icon_history = gbitmap_create_with_resource(RESOURCE_ID_ACTION_ICON_HISTORY);
   s_icon_start   = gbitmap_create_with_resource(RESOURCE_ID_ACTION_ICON_START);
+  s_icon_info    = gbitmap_create_with_resource(RESOURCE_ID_ACTION_ICON_INFO);
 
   s_action_bar = action_bar_layer_create();
   action_bar_layer_set_background_color(s_action_bar, GColorBlack);
-  action_bar_layer_set_icon(s_action_bar, BUTTON_ID_UP,     s_icon_history);
-  action_bar_layer_set_icon(s_action_bar, BUTTON_ID_SELECT, s_icon_start);
+  action_bar_layer_set_icon(s_action_bar, BUTTON_ID_UP, s_icon_history);
   action_bar_layer_set_click_config_provider(s_action_bar, click_config_provider);
   action_bar_layer_add_to_window(s_action_bar, window);
 
@@ -168,24 +208,27 @@ static void main_window_load(Window *window) {
   int16_t pdc_x   = (content_w - PDC_IMAGE_SIZE) / 2;
 
   s_point_right_image = gdraw_command_image_create_with_resource(RESOURCE_ID_POINT_RIGHT);
+  s_warning_image     = gdraw_command_image_create_with_resource(RESOURCE_ID_GENERIC_WARNING_80PX);
 
   s_pdc_layer = layer_create(GRect(pdc_x, pdc_top, PDC_IMAGE_SIZE, PDC_IMAGE_SIZE));
   layer_set_update_proc(s_pdc_layer, pdc_layer_update_proc);
   layer_add_child(window_layer, s_pdc_layer);
 
-  // Prompt text "Ready": vertically centered between status bar and top of PDC image
+  // Prompt text: vertically centered between status bar and top of PDC image
   int16_t text_area_top = STATUS_BAR_LAYER_HEIGHT;
   int16_t text_area_h   = pdc_top - text_area_top;
   int16_t text_h        = PROMPT_FONT_LINE_H + 4;
   int16_t text_y        = text_area_top + (text_area_h - text_h) / 2;
 
   s_prompt_layer = text_layer_create(GRect(0, text_y, content_w, text_h));
-  text_layer_set_text(s_prompt_layer, "Ready");
   text_layer_set_text_alignment(s_prompt_layer, GTextAlignmentCenter);
   text_layer_set_font(s_prompt_layer, fonts_get_system_font(PROMPT_FONT_KEY));
   text_layer_set_text_color(s_prompt_layer, PBL_IF_COLOR_ELSE(GColorWhite, GColorBlack));
   text_layer_set_background_color(s_prompt_layer, GColorClear);
   layer_add_child(window_layer, text_layer_get_layer(s_prompt_layer));
+
+  // Apply initial ready state to text and action bar icon
+  apply_ready_state();
 }
 
 static void main_window_unload(Window *window) {
@@ -194,16 +237,26 @@ static void main_window_unload(Window *window) {
   action_bar_layer_destroy(s_action_bar);
   gbitmap_destroy(s_icon_history);
   gbitmap_destroy(s_icon_start);
+  gbitmap_destroy(s_icon_info);
   layer_destroy(s_pdc_layer);
   if (s_point_right_image) {
     gdraw_command_image_destroy(s_point_right_image);
     s_point_right_image = NULL;
+  }
+  if (s_warning_image) {
+    gdraw_command_image_destroy(s_warning_image);
+    s_warning_image = NULL;
   }
   text_layer_destroy(s_prompt_layer);
 }
 
 // --- Initialization ---
 static void init() {
+#ifdef DEMO_MODE
+  s_ready_state = READY_OK;
+  listen_window_set_demo_mode(true);
+#endif
+
   s_main_window = window_create();
 
   window_set_window_handlers(s_main_window, (WindowHandlers) {

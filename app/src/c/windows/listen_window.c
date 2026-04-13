@@ -35,6 +35,7 @@ static PropertyAnimation *s_artist_anim;
 static char s_title_buffer[64];
 static char s_artist_buffer[70];
 static GRect s_window_bounds;
+static bool s_demo_mode = false;
 
 // Custom animation curve for back out with overshoot effect
 AnimationProgress animation_back_out_overshoot_curve(AnimationProgress linear_distance) {
@@ -108,6 +109,7 @@ static void on_graphic_state(ListenGraphicState state) {
       break;
     }
     case LISTEN_GRAPHIC_STATE_FINDING: {
+      if (!s_demo_mode) vibes_short_pulse();
       // Switch to black on yellow when the find animation begins
       window_set_background_color(s_listen_window, PBL_IF_COLOR_ELSE(GColorYellow, GColorWhite));
       status_bar_layer_set_colors(s_listen_status_bar,
@@ -231,5 +233,10 @@ void listen_window_on_result(const char *title, const char *artist) {
 }
 
 void listen_window_on_not_found(void) {
+  if (!s_demo_mode) vibes_long_pulse();
   push_notfound_window(s_listen_window);
+}
+
+void listen_window_set_demo_mode(bool demo) {
+  s_demo_mode = demo;
 }

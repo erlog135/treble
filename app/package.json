@@ -15,6 +15,7 @@
       "basalt",
       "chalk",
       "diorite",
+      "flint",
       "emery",
       "gabbro"
     ],
@@ -58,6 +59,11 @@
         },
         {
           "type": "raw",
+          "name": "GENERIC_WARNING_25PX",
+          "file": "GenericWarning_25px.pdc"
+        },
+        {
+          "type": "raw",
           "name": "POINT_RIGHT",
           "file": "PointRight.pdc"
         },
@@ -70,6 +76,11 @@
           "type": "bitmap",
           "name": "ACTION_ICON_START",
           "file": "Action_Start.png"
+        },
+        {
+          "type": "bitmap",
+          "name": "ACTION_ICON_INFO",
+          "file": "Action_Info.png"
         }
       ]
     }
