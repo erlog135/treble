@@ -28,6 +28,12 @@
     "resources": {
       "media": [
         {
+          "type": "bitmap",
+          "name": "MENU_ICON",
+          "file": "Treble2_25px.png",
+          "menuIcon": true
+        },
+        {
           "type": "raw",
           "name": "SONG_LOOK_SEQUENCE",
           "file": "sequences/SongLook.pdcs"

@@ -5,8 +5,8 @@
 static const char *s_messages[] = {
   NULL,
   NULL,
-  "Can't connect to companion app. Install it from the store page and set it up.",
-  "Companion app doesn't have required permissions or background access."
+  "Can't connect to companion app. Install it from the store page and let it run.",
+  "Companion app needs required permissions and background access."
 };
 
 static Window *s_window;
@@ -60,6 +60,14 @@ static void window_unload(Window *window) {
 void message_dialog_push(int reason) {
   if (reason < 2 || reason > 3) return;
   s_message = s_messages[reason];
+
+  vibes_long_pulse();
+
+  // Remove the listen window so back returns to the main screen
+  Window *top = window_stack_get_top_window();
+  if (top && top != s_window) {
+    window_stack_remove(top, false);
+  }
 
   if (!s_window) {
     s_window = window_create();

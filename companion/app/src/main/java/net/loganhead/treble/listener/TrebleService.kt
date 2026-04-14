@@ -60,8 +60,8 @@ class TrebleService : Service() {
         // 1. Create the Notification Channel & Notification
         createNotificationChannel()
         val notification: Notification = NotificationCompat.Builder(this, channelId)
-            .setContentTitle("Treble is Listening")
-            .setContentText("Ready for watch commands")
+            .setContentTitle("Ready to Listen")
+            .setContentText("Awaiting commands from watchapp")
             .setSmallIcon(android.R.drawable.ic_btn_speak_now)
             .setOngoing(true)
             .setPriority(NotificationCompat.PRIORITY_LOW)

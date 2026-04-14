@@ -51,6 +51,7 @@ typedef struct { int start_idx; int num_items; } SectionData;
 static Window          *s_history_window;
 static StatusBarLayer  *s_history_status_bar;
 static MenuLayer       *s_menu_layer;
+static bool             s_demo_mode = false;
 
 static SectionData  s_sections[MAX_SECTIONS];
 static char         s_section_titles[MAX_SECTIONS][16]; // e.g. "Sat, Apr 11"
@@ -100,9 +101,67 @@ static void build_menu_data(void) {
   s_num_sections = 0;
   s_total_items  = 0;
 
-  GFont title_font    = fonts_get_system_font(FONT_KEY_GOTHIC_24_BOLD);
-  GFont sub_font      = fonts_get_system_font(SUBTITLE_FONT_KEY);
+  GFont title_font     = fonts_get_system_font(FONT_KEY_GOTHIC_24_BOLD);
+  GFont sub_font       = fonts_get_system_font(SUBTITLE_FONT_KEY);
   GRect measure_bounds = GRect(0, 0, 2000, 30);
+
+  if (s_demo_mode) {
+#if defined(PBL_PLATFORM_APLITE)
+    const char *demo_title  = "Lotta Good";
+    const char *demo_artist = "Slow Coast";
+#elif defined(PBL_PLATFORM_BASALT)
+    const char *demo_title  = "Then Comes the Wonder";
+    const char *demo_artist = "The Landing";
+#elif defined(PBL_PLATFORM_CHALK)
+    const char *demo_title  = "Like What I'm Seeing";
+    const char *demo_artist = "Layup";
+#elif defined(PBL_PLATFORM_DIORITE)
+    const char *demo_title  = "&Run";
+    const char *demo_artist = "Sir Sly";
+#elif defined(PBL_PLATFORM_FLINT)
+    const char *demo_title  = "What's It Like Now";
+    const char *demo_artist = "Mikky Ekko";
+#elif defined(PBL_PLATFORM_EMERY)
+    const char *demo_title  = "My Type";
+    const char *demo_artist = "Saint Motel";
+#elif defined(PBL_PLATFORM_GABBRO)
+    const char *demo_title  = "They Don't Make Em Like Me";
+    const char *demo_artist = "Pigeon John";
+#else
+    const char *demo_title  = "Demo Song";
+    const char *demo_artist = "Demo Artist";
+#endif
+
+    // Thu, Feb 12: platform song + Never Gonna Give You Up
+    // Fri, Feb 6:  Sandstorm
+    strncpy(s_item_titles[0],  demo_title,                sizeof(s_item_titles[0])  - 1);
+    strncpy(s_item_artists[0], demo_artist,               sizeof(s_item_artists[0]) - 1);
+    strncpy(s_item_titles[1],  "Never Gonna Give You Up", sizeof(s_item_titles[1])  - 1);
+    strncpy(s_item_artists[1], "Rick Astley",             sizeof(s_item_artists[1]) - 1);
+    strncpy(s_item_titles[2],  "Sandstorm",               sizeof(s_item_titles[2])  - 1);
+    strncpy(s_item_artists[2], "Darude",                  sizeof(s_item_artists[2]) - 1);
+
+    for (int i = 0; i < 3; i++) {
+      s_item_titles[i][sizeof(s_item_titles[0])   - 1] = '\0';
+      s_item_artists[i][sizeof(s_item_artists[0]) - 1] = '\0';
+      GSize ts = graphics_text_layout_get_content_size(
+          s_item_titles[i], title_font, measure_bounds,
+          GTextOverflowModeWordWrap, GTextAlignmentLeft);
+      s_title_widths[i] = ts.w;
+      GSize as = graphics_text_layout_get_content_size(
+          s_item_artists[i], sub_font, measure_bounds,
+          GTextOverflowModeWordWrap, GTextAlignmentLeft);
+      s_artist_widths[i] = as.w;
+    }
+
+    strncpy(s_section_titles[0], "Sun, Mar 12", sizeof(s_section_titles[0]));
+    strncpy(s_section_titles[1], "Thu, Mar 2",  sizeof(s_section_titles[1]));
+    s_sections[0]  = (SectionData){ .start_idx = 0, .num_items = 2 };
+    s_sections[1]  = (SectionData){ .start_idx = 2, .num_items = 1 };
+    s_num_sections = 2;
+    s_total_items  = 3;
+    return;
+  }
 
   int count = history_store_count();
   if (count == 0) {
@@ -412,4 +471,8 @@ void push_history_window(void) {
     });
   }
   window_stack_push(s_history_window, true);
+}
+
+void history_window_set_demo_mode(bool demo) {
+  s_demo_mode = demo;
 }

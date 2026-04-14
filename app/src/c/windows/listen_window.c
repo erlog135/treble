@@ -225,7 +225,9 @@ void push_listen_window(void) {
 }
 
 void listen_window_on_result(const char *title, const char *artist) {
-  history_store_add(title, artist);
+  if (!s_demo_mode) {
+    history_store_add(title, artist);
+  }
   snprintf(s_title_buffer, sizeof(s_title_buffer), "%s", title);
   snprintf(s_artist_buffer, sizeof(s_artist_buffer), "by %s", artist);
   text_layer_set_text(s_listen_artist_layer, s_artist_buffer);

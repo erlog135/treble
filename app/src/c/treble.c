@@ -17,7 +17,7 @@
 #define RES_NO_PERMS   3
 
 // Uncomment to simulate a successful recognition after 5 seconds (no phone needed)
-// #define DEMO_MODE
+#define DEMO_MODE
 
 #if defined(PBL_PLATFORM_EMERY) || defined(PBL_PLATFORM_GABBRO)
   #define PROMPT_FONT_KEY    FONT_KEY_GOTHIC_28_BOLD
@@ -51,10 +51,23 @@ static void demo_timer_callback(void *context) {
     return;
   }
 
-  // listen_window_on_result("Sandstorm", "Darude");
-  // listen_window_on_result("Super Duper Long Song Name I Wonder How This Will Wrap", "Darude");
-  // listen_window_on_result("Sandstorm", "Super Duper Long Artist Name I Wonder How This Will Wrap");
-  listen_window_on_result("Super Duper Long Song Name I Wonder How This Will Wrap", "Super Duper Long Artist Name I Wonder How This Will Wrap");
+#if defined(PBL_PLATFORM_APLITE)
+  listen_window_on_result("Lotta Good", "Slow Coast");
+#elif defined(PBL_PLATFORM_BASALT)
+  listen_window_on_result("Then Comes the Wonder", "The Landing");
+#elif defined(PBL_PLATFORM_CHALK)
+  listen_window_on_result("Like What I'm Seeing", "Layup");
+#elif defined(PBL_PLATFORM_DIORITE)
+  listen_window_on_result("&Run", "Sir Sly");
+#elif defined(PBL_PLATFORM_FLINT)
+  listen_window_on_result("What's It Like Now", "Mikky Ekko");
+#elif defined(PBL_PLATFORM_EMERY)
+  listen_window_on_result("My Type", "Saint Motel");
+#elif defined(PBL_PLATFORM_GABBRO)
+  listen_window_on_result("They Don't Make Em Like Me", "Pigeon John");
+#else
+  listen_window_on_result("Demo Song", "Demo Artist");
+#endif
 }
 #endif
 
@@ -108,6 +121,9 @@ static void inbox_dropped_callback(AppMessageResult reason, void *context) {
 
 static void outbox_failed_callback(DictionaryIterator *iterator, AppMessageResult reason, void *context) {
   APP_LOG(APP_LOG_LEVEL_ERROR, "Outbox send failed! Reason: %d", (int)reason);
+  if (reason & (APP_MSG_NOT_CONNECTED | APP_MSG_APP_NOT_RUNNING | APP_MSG_SEND_TIMEOUT)) {
+    message_dialog_push(RES_NO_APP);
+  }
 }
 
 // --- Main Window ---
@@ -178,14 +194,14 @@ static void main_window_load(Window *window) {
   layer_set_update_proc(s_pdc_layer, pdc_layer_update_proc);
   layer_add_child(window_layer, s_pdc_layer);
 
-  // Prompt text "Ready": vertically centered between status bar and top of PDC image
+  // Prompt text "Start": vertically centered between status bar and top of PDC image
   int16_t text_area_top = STATUS_BAR_LAYER_HEIGHT;
   int16_t text_area_h   = pdc_top - text_area_top;
   int16_t text_h        = PROMPT_FONT_LINE_H + 4;
   int16_t text_y        = text_area_top + (text_area_h - text_h) / 2;
 
   s_prompt_layer = text_layer_create(GRect(0, text_y, content_w, text_h));
-  text_layer_set_text(s_prompt_layer, "Ready");
+  text_layer_set_text(s_prompt_layer, "Start");
   text_layer_set_text_alignment(s_prompt_layer, GTextAlignmentCenter);
   text_layer_set_font(s_prompt_layer, fonts_get_system_font(PROMPT_FONT_KEY));
   text_layer_set_text_color(s_prompt_layer, PBL_IF_COLOR_ELSE(GColorWhite, GColorBlack));
@@ -224,6 +240,11 @@ static void init() {
   app_message_register_outbox_failed(outbox_failed_callback);
 
   app_message_open(256, 256);
+
+#ifdef DEMO_MODE
+  listen_window_set_demo_mode(true);
+  history_window_set_demo_mode(true);
+#endif
 }
 
 static void deinit() {
