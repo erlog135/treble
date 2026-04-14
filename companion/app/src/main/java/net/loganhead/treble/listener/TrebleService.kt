@@ -8,9 +8,11 @@ import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
+import android.content.pm.PackageManager
 import android.content.pm.ServiceInfo
 import android.os.Build
 import android.os.IBinder
+import android.os.PowerManager
 import androidx.core.app.NotificationCompat
 import androidx.core.app.ServiceCompat
 import androidx.core.content.ContextCompat
@@ -29,6 +31,22 @@ class TrebleService : Service() {
     private val appUuid = UUID.fromString("c49abd69-dd2c-4655-a7ce-ec7da67aa930")
     private var dataReceiver: BroadcastReceiver? = null
     private val channelId = "treble_service_channel"
+
+    // Message Keys
+    private val KEY_COMMAND = 0
+    private val KEY_RESPONSE_RESULT = 1
+    private val KEY_SONG_TITLE = 2
+    private val KEY_SONG_ARTIST = 3
+
+    // Commands
+    private val CMD_START_RECOGNITION = 1
+    private val CMD_CHECK_READY = 2
+
+    // Response Result Values
+    private val RES_SUCCESS = 0
+    private val RES_FAILED = 1
+    private val RES_NO_APP = 2     // Service/Internet unavailable
+    private val RES_NO_PERMS = 3   // Permissions missing
 
     // Scope for background Shazam requests
     private val serviceScope = CoroutineScope(Dispatchers.Main + SupervisorJob())
@@ -67,9 +85,12 @@ class TrebleService : Service() {
             override fun receiveData(context: Context, transactionId: Int, dict: PebbleDictionary) {
                 PebbleKit.sendAckToPebble(context, transactionId)
 
-                val commandValue = dict.getInteger(0) // KEY_COMMAND
-                if (commandValue != null && commandValue.toInt() == 1) { // CMD_START_RECOGNITION
-                    handleRecognitionRequest()
+                val commandValue = dict.getInteger(KEY_COMMAND)
+                if (commandValue != null) {
+                    when (commandValue.toInt()) {
+                        CMD_START_RECOGNITION -> handleRecognitionRequest()
+                        CMD_CHECK_READY -> sendReadyStatus()
+                    }
                 }
             }
         }
@@ -94,29 +115,71 @@ class TrebleService : Service() {
     }
 
     private fun handleRecognitionRequest() {
+        val readiness = checkReadiness()
+        if (readiness != RES_SUCCESS) {
+            sendLogToActivity("Recognition blocked: Readiness status $readiness")
+            sendResponse(readiness)
+            return
+        }
+
         sendLogToActivity("Recognition requested. Listening...")
 
         serviceScope.launch {
             val result = shazamManager.recognizeMusic()
             if (result.isSuccess) {
                 sendLogToActivity("Found: ${result.title} by ${result.artist}")
-                sendRecognitionResult(true, result.title, result.artist)
+                sendRecognitionResult(result.title, result.artist)
             } else {
                 sendLogToActivity("Failed: ${result.error}")
-                sendRecognitionResult(false)
+                sendResponse(RES_FAILED)
             }
         }
     }
 
-    private fun sendRecognitionResult(isSuccess: Boolean, title: String = "", artist: String = "") {
-        val dict = PebbleDictionary()
-        if (isSuccess) {
-            dict.addInt32(1, 1) // KEY_RESPONSE_RESULT = RES_SUCCESS
-            dict.addString(2, title) // KEY_SONG_TITLE
-            dict.addString(3, artist) // KEY_SONG_ARTIST
-        } else {
-            dict.addInt32(1, 0) // KEY_RESPONSE_RESULT = RES_FAILED
+    private fun checkReadiness(): Int {
+        // 1. Microphone Permission
+        if (ContextCompat.checkSelfPermission(this, android.Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
+            return RES_NO_PERMS
         }
+
+        // 2. Notification Permission (Android 13+)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            if (ContextCompat.checkSelfPermission(this, android.Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
+                return RES_NO_PERMS
+            }
+        }
+
+        // 3. Battery Optimization
+        val powerManager = getSystemService(Context.POWER_SERVICE) as PowerManager
+        if (!powerManager.isIgnoringBatteryOptimizations(packageName)) {
+            return RES_NO_PERMS
+        }
+
+        // 4. Internet Availability (Shazam requires cloud)
+        if (!isNetworkAvailable(this)) {
+            return RES_NO_APP
+        }
+        
+        return RES_SUCCESS
+    }
+
+    private fun sendReadyStatus() {
+        val status = checkReadiness()
+        sendResponse(status)
+        sendLogToActivity("Sent readiness status: $status")
+    }
+
+    private fun sendResponse(resultCode: Int) {
+        val dict = PebbleDictionary()
+        dict.addInt32(KEY_RESPONSE_RESULT, resultCode)
+        PebbleKit.sendDataToPebble(this, appUuid, dict)
+    }
+
+    private fun sendRecognitionResult(title: String, artist: String) {
+        val dict = PebbleDictionary()
+        dict.addInt32(KEY_RESPONSE_RESULT, RES_SUCCESS)
+        dict.addString(KEY_SONG_TITLE, title)
+        dict.addString(KEY_SONG_ARTIST, artist)
         PebbleKit.sendDataToPebble(this, appUuid, dict)
     }
 

@@ -5,8 +5,12 @@ import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
+import android.content.pm.PackageManager
+import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.os.PowerManager
+import android.provider.Settings
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
@@ -14,12 +18,14 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.material3.Button
-import androidx.compose.material3.Scaffold
-import androidx.compose.material3.Text
-import androidx.compose.runtime.Composable
-import androidx.compose.runtime.mutableStateListOf
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.Warning
+import androidx.compose.material3.*
+import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import com.getpebble.android.kit.PebbleKit
@@ -31,7 +37,6 @@ class MainActivity : ComponentActivity() {
     private val appUuid = UUID.fromString("c49abd69-dd2c-4655-a7ce-ec7da67aa930")
     private val logMessages = mutableStateListOf<String>()
 
-    // Broadcast receiver to get logs from the TrebleService
     private val logReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context, intent: Intent) {
             val message = intent.getStringExtra("message")
@@ -43,45 +48,75 @@ class MainActivity : ComponentActivity() {
 
     private val requestPermissionsLauncher = registerForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
-    ) { permissions ->
-        val micGranted = permissions[Manifest.permission.RECORD_AUDIO] ?: false
-        if (micGranted) {
-            logMessages.add("Permissions granted. Starting Service...")
-            startTrebleService()
-        } else {
-            logMessages.add("Error: Mic permission denied. Service cannot run.")
-        }
+    ) { _ ->
+        // State will refresh on next recomposition
     }
 
+    @OptIn(ExperimentalMaterial3Api::class)
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
 
-        logMessages.add("Checking permissions...")
-
-        val shazamManager = ShazamManager(this)
-
-        // Define required permissions (Notification permission needed for Android 13+)
-        val requiredPermissions = mutableListOf(Manifest.permission.RECORD_AUDIO)
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            requiredPermissions.add(Manifest.permission.POST_NOTIFICATIONS)
-        }
-
-        if (!shazamManager.hasMicrophonePermission()) {
-            requestPermissionsLauncher.launch(requiredPermissions.toTypedArray())
-        } else {
-            startTrebleService()
-        }
-
         setContent {
             TrebleListenerTheme {
-                Scaffold(modifier = Modifier.fillMaxSize()) { innerPadding ->
-                    TrebleScreen(
-                        logMessages = logMessages,
-                        onLaunchClicked = { launchWatchApp() },
-                        onSimulateClicked = { forceServiceToListen() },
-                        modifier = Modifier.padding(innerPadding)
-                    )
+                var showPermissionsPage by remember { mutableStateOf(false) }
+                val context = LocalContext.current
+                
+                // Track permission status reactively
+                val permissionsStatus = checkAllPermissions(context)
+
+                // Periodically check permissions when app comes to foreground or state changes
+                LaunchedEffect(Unit, showPermissionsPage) {
+                    if (permissionsStatus) {
+                        startTrebleService()
+                    }
+                }
+
+                Scaffold(
+                    modifier = Modifier.fillMaxSize(),
+                    topBar = {
+                        TopAppBar(
+                            title = { Text("Treble Listener") },
+                            actions = {
+                                IconButton(onClick = { showPermissionsPage = !showPermissionsPage }) {
+                                    Icon(
+                                        imageVector = if (permissionsStatus) Icons.Default.CheckCircle else Icons.Default.Warning,
+                                        contentDescription = "Permissions",
+                                        tint = if (permissionsStatus) Color.Green else Color.Yellow
+                                    )
+                                }
+                            }
+                        )
+                    }
+                ) { innerPadding ->
+                    if (showPermissionsPage) {
+                        PermissionsScreen(
+                            onClose = { 
+                                showPermissionsPage = false
+                                if (checkAllPermissions(context)) startTrebleService()
+                            },
+                            onRequestMic = { requestPermissionsLauncher.launch(arrayOf(Manifest.permission.RECORD_AUDIO)) },
+                            onRequestNotifications = {
+                                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                                    requestPermissionsLauncher.launch(arrayOf(Manifest.permission.POST_NOTIFICATIONS))
+                                }
+                            },
+                            onRequestBattery = {
+                                val intent = Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS).apply {
+                                    data = Uri.parse("package:$packageName")
+                                }
+                                startActivity(intent)
+                            },
+                            modifier = Modifier.padding(innerPadding)
+                        )
+                    } else {
+                        TrebleScreen(
+                            logMessages = logMessages,
+                            onLaunchClicked = { launchWatchApp() },
+                            onSimulateClicked = { forceServiceToListen() },
+                            modifier = Modifier.padding(innerPadding)
+                        )
+                    }
                 }
             }
         }
@@ -89,19 +124,30 @@ class MainActivity : ComponentActivity() {
 
     override fun onResume() {
         super.onResume()
-        // Register the log receiver so the UI updates while the app is open
         val filter = IntentFilter("net.loganhead.treble.LOG_EVENT")
         ContextCompat.registerReceiver(
             this,
             logReceiver,
             filter,
-            ContextCompat.RECEIVER_NOT_EXPORTED // Securely listen only to our own app
+            ContextCompat.RECEIVER_NOT_EXPORTED
         )
     }
 
     override fun onPause() {
         super.onPause()
         unregisterReceiver(logReceiver)
+    }
+
+    private fun checkAllPermissions(context: Context): Boolean {
+        val mic = ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED
+        val notifications = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED
+        } else true
+        
+        val powerManager = context.getSystemService(Context.POWER_SERVICE) as PowerManager
+        val battery = powerManager.isIgnoringBatteryOptimizations(context.packageName)
+
+        return mic && notifications && battery
     }
 
     private fun startTrebleService() {
@@ -132,7 +178,6 @@ fun TrebleScreen(
     Column(
         modifier = modifier.fillMaxSize().padding(16.dp)
     ) {
-
         Button(
             onClick = onLaunchClicked,
             modifier = Modifier.fillMaxWidth()

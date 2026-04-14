@@ -4,8 +4,9 @@
 
 static const char *s_messages[] = {
   NULL,
-  "Can't connect to companion app. Install it from the store page and set it up.\0",
-  "Companion app doesn't have required permissions or background access.\0"
+  NULL,
+  "Can't connect to companion app. Install it from the store page and set it up.",
+  "Companion app doesn't have required permissions or background access."
 };
 
 static Window *s_window;
@@ -56,9 +57,9 @@ static void window_unload(Window *window) {
   s_window = NULL;
 }
 
-void message_dialog_push(int ready_state) {
-  if (ready_state < 1 || ready_state > 2) return;
-  s_message = s_messages[ready_state];
+void message_dialog_push(int reason) {
+  if (reason < 2 || reason > 3) return;
+  s_message = s_messages[reason];
 
   if (!s_window) {
     s_window = window_create();

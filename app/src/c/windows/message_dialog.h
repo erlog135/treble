@@ -2,5 +2,5 @@
 
 #include <pebble.h>
 
-// ready_state: 1 = no app detected, 2 = app lacks permissions
-void message_dialog_push(int ready_state);
+// reason: RES_NO_APP (2) = no app detected, RES_NO_PERMS (3) = app lacks permissions
+void message_dialog_push(int reason);

@@ -16,8 +16,11 @@ import com.shazam.shazamkit.MatchResult
 import com.shazam.shazamkit.ShazamKit
 import com.shazam.shazamkit.ShazamKitResult
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.isActive
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import java.nio.ByteBuffer
+import kotlinx.coroutines.withTimeoutOrNull
+import kotlinx.coroutines.flow.firstOrNull
 
 data class SongResult(
     val isSuccess: Boolean,
@@ -41,37 +44,41 @@ class ShazamManager(private val context: Context) {
             return@withContext SongResult(false, error = "Microphone permission denied.")
         }
 
-        // 1. Initialize the Developer Token Provider
         val tokenProvider = DeveloperTokenProvider {
             DeveloperToken(BuildConfig.SHAZAM_JWT)
         }
 
-        // 2. Setup the Catalog and Signature Generator
         val catalog = ShazamKit.createShazamCatalog(tokenProvider)
 
-        val signatureGeneratorResult = ShazamKit.createSignatureGenerator(AudioSampleRateInHz.SAMPLE_RATE_48000)
-        if (signatureGeneratorResult is ShazamKitResult.Failure<*>) {
-            return@withContext SongResult(false, error = "Failed to create Signature Generator.")
-        }
-        val signatureGenerator = (signatureGeneratorResult as ShazamKitResult.Success<*>).data as com.shazam.shazamkit.SignatureGenerator
-
-        // 3. Setup AudioRecord properties
         val sampleRate = 48000
-        val audioFormat = AudioFormat.Builder()
-            .setChannelMask(AudioFormat.CHANNEL_IN_MONO)
-            .setEncoding(AudioFormat.ENCODING_PCM_16BIT)
-            .setSampleRate(sampleRate)
-            .build()
-
         val bufferSize = AudioRecord.getMinBufferSize(
             sampleRate,
             AudioFormat.CHANNEL_IN_MONO,
             AudioFormat.ENCODING_PCM_16BIT
         )
 
+        // 1. Initialize Streaming Session instead of Signature Generator
+        val streamingSessionResult = ShazamKit.createStreamingSession(
+            catalog,
+            AudioSampleRateInHz.SAMPLE_RATE_48000,
+            bufferSize
+        )
+
+        if (streamingSessionResult is ShazamKitResult.Failure<*>) {
+            return@withContext SongResult(false, error = "Failed to create Streaming Session.")
+        }
+        val streamingSession = (streamingSessionResult as ShazamKitResult.Success<*>).data as com.shazam.shazamkit.StreamingSession
+
+        // 2. Use MIC to take advantage of Android's internal noise reduction and AGC
+        val audioFormat = AudioFormat.Builder()
+            .setChannelMask(AudioFormat.CHANNEL_IN_MONO)
+            .setEncoding(AudioFormat.ENCODING_PCM_16BIT)
+            .setSampleRate(sampleRate)
+            .build()
+
         val audioRecord = try {
             AudioRecord.Builder()
-                .setAudioSource(MediaRecorder.AudioSource.UNPROCESSED)
+                .setAudioSource(MediaRecorder.AudioSource.MIC)
                 .setAudioFormat(audioFormat)
                 .build()
         } catch (e: SecurityException) {
@@ -82,74 +89,61 @@ class ShazamManager(private val context: Context) {
             return@withContext SongResult(false, error = "AudioRecord failed to initialize.")
         }
 
-        // We will record 8 seconds of audio to build a solid signature
-        val recordDurationSeconds = 8
-        val bytesPerSample = 2 // 16-bit PCM = 2 bytes
-        val totalBytesToRead = sampleRate * bytesPerSample * recordDurationSeconds
-        val destination = ByteBuffer.allocate(totalBytesToRead)
-
-        // Elevate thread priority for stable audio recording
         Process.setThreadPriority(Process.THREAD_PRIORITY_URGENT_AUDIO)
 
         try {
             audioRecord.startRecording()
-            val readBuffer = ByteArray(bufferSize)
 
-            // 4. Read audio and feed it into the buffer
-            while (destination.remaining() > 0) {
-                val actualRead = audioRecord.read(readBuffer, 0, bufferSize)
-                if (actualRead < 0) {
-                    throw Exception("AudioRecord error code: $actualRead")
-                }
+            // 3. Wrap everything in a Timeout so it doesn't listen forever if there's no music
+            val finalResult = withTimeoutOrNull(15_000L) { // Listen for a max of 15 seconds
 
-                val byteArray = if (actualRead < bufferSize) {
-                    readBuffer.copyOfRange(0, actualRead)
-                } else {
-                    readBuffer
-                }
-
-                if (byteArray.size <= destination.remaining()) {
-                    destination.put(byteArray)
-                } else {
-                    destination.put(byteArray, 0, destination.remaining())
-                }
-
-                // Append chunks to ShazamKit
-                signatureGenerator.append(byteArray, actualRead, System.currentTimeMillis())
-            }
-
-            // 5. Generate fingerprint and query Shazam
-            val signature = signatureGenerator.generateSignature()
-
-            val sessionResult = ShazamKit.createSession(catalog)
-            if (sessionResult is ShazamKitResult.Failure<*>) {
-                return@withContext SongResult(false, error = "Failed to create matching session.")
-            }
-            val session = (sessionResult as ShazamKitResult.Success<*>).data as com.shazam.shazamkit.Session
-
-            // 6. Handle the Result
-            return@withContext when (val matchResult = session.match(signature)) {
-                is MatchResult.Match -> {
-                    // Usually the first item is the most confident match
-                    val topMatch = matchResult.matchedMediaItems.firstOrNull()
-                    if (topMatch != null) {
-                        SongResult(true, topMatch.title ?: "Unknown", topMatch.artist ?: "Unknown")
-                    } else {
-                        SongResult(false, error = "Match found, but media data was empty.")
+                // Launch a parallel job to constantly feed the microphone into ShazamKit
+                val readerJob = launch(Dispatchers.IO) {
+                    val readBuffer = ByteArray(bufferSize)
+                    while (isActive) {
+                        val actualRead = audioRecord.read(readBuffer, 0, bufferSize)
+                        if (actualRead > 0) {
+                            // Push incremental samples directly to the API
+                            streamingSession.matchStream(readBuffer, actualRead, System.currentTimeMillis())
+                        }
                     }
                 }
-                is MatchResult.NoMatch -> {
-                    SongResult(false, error = "No match found.")
+
+                // 4. Collect the results stream.
+                // firstOrNull will suspend until the condition is met.
+                // We ignore NoMatch (keep listening) and stop on Match or Error.
+                val matchResult = streamingSession.recognitionResults().firstOrNull {
+                    it is MatchResult.Match || it is MatchResult.Error
                 }
-                is MatchResult.Error -> {
-                    SongResult(false, error = "Shazam API Error: ${matchResult.exception.message}")
+
+                // Stop the microphone reader now that we have a definitive result
+                readerJob.cancel()
+
+                // 5. Evaluate the result
+                when (matchResult) {
+                    is MatchResult.Match -> {
+                        val topMatch = matchResult.matchedMediaItems.firstOrNull()
+                        if (topMatch != null) {
+                            SongResult(true, topMatch.title ?: "Unknown", topMatch.artist ?: "Unknown")
+                        } else {
+                            SongResult(false, error = "Match found, but media data was empty.")
+                        }
+                    }
+                    is MatchResult.Error -> {
+                        SongResult(false, error = "Shazam API Error: ${matchResult.exception.message}")
+                    }
+                    else -> {
+                        SongResult(false, error = "Unknown flow state.")
+                    }
                 }
             }
+
+            // Return the result, or handle the timeout if withTimeoutOrNull returns null
+            return@withContext finalResult ?: SongResult(false, error = "Listening timed out. No music found.")
 
         } catch (e: Exception) {
             return@withContext SongResult(false, error = "Exception: ${e.localizedMessage}")
         } finally {
-            // ALWAYS release resources
             try {
                 if (audioRecord.recordingState == AudioRecord.RECORDSTATE_RECORDING) {
                     audioRecord.stop()
