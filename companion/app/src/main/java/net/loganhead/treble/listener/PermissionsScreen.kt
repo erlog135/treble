@@ -18,6 +18,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLifecycleOwner
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.Lifecycle
@@ -75,12 +76,17 @@ fun PermissionsScreen(
     ) {
         Text(
             text = "System Setup",
-            style = MaterialTheme.typography.headlineMedium
+            style = MaterialTheme.typography.headlineMedium,
+            color = MaterialTheme.colorScheme.primary,
+            fontWeight = FontWeight.Bold
         )
         Text(
             text = "Ensure all items are green for Treble Listener to work correctly with your Pebble.",
-            style = MaterialTheme.typography.bodyMedium
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
         )
+
+        Spacer(modifier = Modifier.height(8.dp))
 
         PermissionItem(
             title = "Microphone",
@@ -117,7 +123,8 @@ fun PermissionsScreen(
 
         Button(
             onClick = onClose,
-            modifier = Modifier.fillMaxWidth()
+            modifier = Modifier.fillMaxWidth(),
+            shape = MaterialTheme.shapes.large
         ) {
             Text(if (allReady) "Return to Logs" else "Close (Service may not work)")
         }
@@ -135,8 +142,9 @@ fun PermissionItem(
     Card(
         modifier = Modifier.fillMaxWidth(),
         colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surfaceVariant
-        )
+            containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
+        ),
+        shape = MaterialTheme.shapes.medium
     ) {
         Row(
             modifier = Modifier.padding(16.dp),
@@ -145,7 +153,8 @@ fun PermissionItem(
             Column(modifier = Modifier.weight(1f)) {
                 Text(
                     text = title, 
-                    style = MaterialTheme.typography.titleMedium
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.SemiBold
                 )
                 Text(
                     text = description, 
@@ -159,7 +168,7 @@ fun PermissionItem(
             if (isGranted) {
                 // "Ready" status indicator
                 Surface(
-                    shape = MaterialTheme.shapes.medium,
+                    shape = MaterialTheme.shapes.large,
                     color = Color(0xFF2E7D32), // High-contrast green
                     contentColor = Color.White
                 ) {
@@ -184,7 +193,8 @@ fun PermissionItem(
                         containerColor = MaterialTheme.colorScheme.error,
                         contentColor = MaterialTheme.colorScheme.onError
                     ),
-                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp)
+                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
+                    shape = MaterialTheme.shapes.large
                 ) {
                     Icon(
                         imageVector = Icons.Default.Warning,
@@ -197,7 +207,7 @@ fun PermissionItem(
             } else {
                 // Status for items that don't have a direct "Fix" action
                 Surface(
-                    shape = MaterialTheme.shapes.medium,
+                    shape = MaterialTheme.shapes.large,
                     color = MaterialTheme.colorScheme.errorContainer,
                     contentColor = MaterialTheme.colorScheme.onErrorContainer
                 ) {

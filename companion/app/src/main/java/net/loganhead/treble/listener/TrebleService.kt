@@ -1,5 +1,6 @@
 package net.loganhead.treble.listener
 
+import android.Manifest
 import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
@@ -59,38 +60,11 @@ class TrebleService : Service() {
 
         shazamManager = ShazamManager(this)
 
-        // 1. Create the Notification Channel & Notification
+        // 1. Create the Notification Channel
         createNotificationChannel()
-        val notification: Notification = NotificationCompat.Builder(this, channelId)
-            .setContentTitle("Treble Listener")
-            .setContentText("Awaiting commands from watchapp")
-            .setSmallIcon(R.drawable.ic_listener_notification)
-            .setOngoing(true)
-            .setShowWhen(false)
-            .setPriority(NotificationCompat.PRIORITY_LOW)
-            .build()
-
-        // 2. Start Foreground
-        // On Android 14+, we can only use FOREGROUND_SERVICE_TYPE_MICROPHONE if we have the permission.
-        // If not, we start with 0 to at least keep the service alive to respond with "No Permissions".
-        val hasMicPermission = ContextCompat.checkSelfPermission(this, android.Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED
         
-        val foregroundType = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R && hasMicPermission) {
-            ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE
-        } else {
-            0
-        }
-
-        try {
-            ServiceCompat.startForeground(this, 1, notification, foregroundType)
-        } catch (e: Exception) {
-            // Fallback for strict enforcement on newer Android versions
-            try {
-                ServiceCompat.startForeground(this, 1, notification, 0)
-            } catch (fallbackEx: Exception) {
-                fallbackEx.printStackTrace()
-            }
-        }
+        // 2. Initial foreground start
+        refreshForegroundStatus()
 
         // 3. Register the Pebble Broadcast Receiver
         dataReceiver = object : PebbleKit.PebbleDataReceiver(appUuid) {
@@ -115,17 +89,51 @@ class TrebleService : Service() {
             ContextCompat.RECEIVER_EXPORTED
         )
 
-        sendLogToActivity("Service started and listening to Pebble.")
+        sendLogToActivity("Service initialized.")
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        // Triggered by the "Force Service to Listen" button in the UI or by Boot/Activity
+        // Always refresh foreground status when poked. This ensures that if 
+        // permissions were just granted (Post-Notifications or Mic), the
+        // notification appears and the foreground type is correctly updated.
+        refreshForegroundStatus()
+
         if (intent?.action == "ACTION_FORCE_RECOGNIZE") {
             handleRecognitionRequest()
         }
         
-        // Ensure foreground state is maintained if restarted
         return START_STICKY
+    }
+
+    private fun refreshForegroundStatus() {
+        val notification: Notification = NotificationCompat.Builder(this, channelId)
+            .setContentTitle("Treble Listener")
+            .setContentText("Awaiting commands from watchapp")
+            .setSmallIcon(R.drawable.ic_listener_notification)
+            .setOngoing(true)
+            .setShowWhen(false)
+            .setPriority(NotificationCompat.PRIORITY_LOW)
+            .build()
+
+        // On Android 14+, we can only use FOREGROUND_SERVICE_TYPE_MICROPHONE if we have the permission.
+        val hasMicPermission = ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED
+        
+        val foregroundType = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R && hasMicPermission) {
+            ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE
+        } else {
+            0
+        }
+
+        try {
+            ServiceCompat.startForeground(this, 1, notification, foregroundType)
+        } catch (e: Exception) {
+            // Fallback for cases where specific type might still fail (e.g. missing other reqs)
+            try {
+                ServiceCompat.startForeground(this, 1, notification, 0)
+            } catch (fallbackEx: Exception) {
+                fallbackEx.printStackTrace()
+            }
+        }
     }
 
     private fun handleRecognitionRequest() {
@@ -152,13 +160,13 @@ class TrebleService : Service() {
 
     private fun checkReadiness(): Int {
         // 1. Microphone Permission
-        if (ContextCompat.checkSelfPermission(this, android.Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
+        if (ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
             return RES_NO_PERMS
         }
 
         // 2. Notification Permission (Android 13+)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            if (ContextCompat.checkSelfPermission(this, android.Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
+            if (ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
                 return RES_NO_PERMS
             }
         }

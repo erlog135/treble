@@ -13,10 +13,10 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 
 private val DarkColorScheme = darkColorScheme(
-    primary = Purple80,
-    onPrimary = Color(0xFF21005D), // High contrast dark purple on light lavender
-    primaryContainer = Color(0xFF381E72),
-    onPrimaryContainer = Color(0xFFEADDFF),
+    primary = FollyLight,
+    onPrimary = Color.Black,
+    primaryContainer = FollyDark,
+    onPrimaryContainer = Color.White,
     secondary = PurpleGrey80,
     onSecondary = Color(0xFF332D41),
     secondaryContainer = Color(0xFF4A4458),
@@ -39,10 +39,10 @@ private val DarkColorScheme = darkColorScheme(
 )
 
 private val LightColorScheme = lightColorScheme(
-    primary = Purple40,
+    primary = Folly,
     onPrimary = Color.White,
-    primaryContainer = Color(0xFFEADDFF),
-    onPrimaryContainer = Color(0xFF21005D),
+    primaryContainer = FollyLight,
+    onPrimaryContainer = Color.Black,
     secondary = PurpleGrey40,
     onSecondary = Color.White,
     secondaryContainer = Color(0xFFE8DEF8),
@@ -62,8 +62,8 @@ private val LightColorScheme = lightColorScheme(
 @Composable
 fun TrebleListenerTheme(
     darkTheme: Boolean = isSystemInDarkTheme(),
-    // Disable dynamic colors to ensure consistent contrast in dark mode
-    dynamicColor: Boolean = false,
+    // Dynamic color is available on Android 12+
+    dynamicColor: Boolean = true,
     content: @Composable () -> Unit
 ) {
     val colorScheme = when {

@@ -30,6 +30,8 @@
 #define PDC_IMAGE_SIZE  80
 #define PDC_TOP_OFFSET  24  // pixels above screen center
 
+static AppTimer *s_response_timer;
+
 static Window *s_main_window;
 static StatusBarLayer *s_status_bar;
 static ActionBarLayer *s_action_bar;
@@ -71,6 +73,18 @@ static void demo_timer_callback(void *context) {
 }
 #endif
 
+static void response_timeout_callback(void *context) {
+  s_response_timer = NULL;
+  message_dialog_push(RES_NO_APP);
+}
+
+static void cancel_response_timer() {
+  if (s_response_timer) {
+    app_timer_cancel(s_response_timer);
+    s_response_timer = NULL;
+  }
+}
+
 // --- Sending Data to Android ---
 static void send_recognition_request() {
 #ifdef DEMO_MODE
@@ -89,6 +103,9 @@ static void send_recognition_request() {
 
   dict_write_int32(iter, KEY_COMMAND, CMD_START_RECOGNITION);
   app_message_outbox_send();
+
+  cancel_response_timer();
+  s_response_timer = app_timer_register(20000, response_timeout_callback, NULL);
 #endif
 }
 
@@ -99,6 +116,7 @@ static void inbox_received_callback(DictionaryIterator *iterator, void *context)
   Tuple *result_tuple = dict_find(iterator, KEY_RESPONSE_RESULT);
 
   if (result_tuple) {
+    cancel_response_timer();
     int result = result_tuple->value->int32;
 
     if (result == RES_SUCCESS) {
@@ -123,7 +141,8 @@ static void inbox_dropped_callback(AppMessageResult reason, void *context) {
 
 static void outbox_failed_callback(DictionaryIterator *iterator, AppMessageResult reason, void *context) {
   APP_LOG(APP_LOG_LEVEL_ERROR, "Outbox send failed! Reason: %d", (int)reason);
-  if (reason & (APP_MSG_NOT_CONNECTED | APP_MSG_APP_NOT_RUNNING | APP_MSG_SEND_TIMEOUT)) {
+  cancel_response_timer();
+  if (reason) {
     message_dialog_push(RES_NO_APP);
   }
 }
