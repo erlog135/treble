@@ -212,6 +212,11 @@ static void listen_window_unload(Window *window) {
   s_listen_window = NULL;
 }
 
+bool listen_window_is_active(void) {
+  return s_listen_window != NULL &&
+         window_stack_get_top_window() == s_listen_window;
+}
+
 void push_listen_window(void) {
   if (!s_listen_window) {
     s_listen_window = window_create();

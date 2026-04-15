@@ -26,8 +26,11 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
 import com.getpebble.android.kit.PebbleKit
 import net.loganhead.treble.listener.ui.theme.TrebleListenerTheme
 import java.util.UUID
@@ -57,20 +60,28 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
 
+        // Always ensure service is running
+        startTrebleService()
+
         setContent {
             TrebleListenerTheme {
-                var showPermissionsPage by remember { mutableStateOf(false) }
                 val context = LocalContext.current
+                val lifecycleOwner = LocalLifecycleOwner.current
+                var showPermissionsPage by remember { mutableStateOf(false) }
                 
-                // Track permission status reactively
-                val permissionsStatus = checkAllPermissions(context)
-
-                // Periodically check permissions when app comes to foreground or state changes
-                LaunchedEffect(Unit, showPermissionsPage) {
-                    if (permissionsStatus) {
-                        startTrebleService()
+                // Track permission status reactively with lifecycle awareness
+                var refreshTrigger by remember { mutableIntStateOf(0) }
+                DisposableEffect(lifecycleOwner) {
+                    val observer = LifecycleEventObserver { _, event ->
+                        if (event == Lifecycle.Event.ON_RESUME) {
+                            refreshTrigger++
+                        }
                     }
+                    lifecycleOwner.lifecycle.addObserver(observer)
+                    onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
                 }
+
+                val permissionsStatus = remember(refreshTrigger) { checkAllPermissions(context) }
 
                 Scaffold(
                     modifier = Modifier.fillMaxSize(),
@@ -78,11 +89,31 @@ class MainActivity : ComponentActivity() {
                         TopAppBar(
                             title = { Text("Treble Listener") },
                             actions = {
-                                IconButton(onClick = { showPermissionsPage = !showPermissionsPage }) {
+                                Button(
+                                    onClick = { showPermissionsPage = !showPermissionsPage },
+                                    colors = if (permissionsStatus) {
+                                        ButtonDefaults.buttonColors(
+                                            containerColor = Color(0xFF2E7D32),
+                                            contentColor = Color.White
+                                        )
+                                    } else {
+                                        ButtonDefaults.buttonColors(
+                                            containerColor = MaterialTheme.colorScheme.error,
+                                            contentColor = MaterialTheme.colorScheme.onError
+                                        )
+                                    },
+                                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp),
+                                    modifier = Modifier.padding(end = 8.dp)
+                                ) {
                                     Icon(
                                         imageVector = if (permissionsStatus) Icons.Default.CheckCircle else Icons.Default.Warning,
-                                        contentDescription = "Permissions",
-                                        tint = if (permissionsStatus) Color.Green else Color.Yellow
+                                        contentDescription = null,
+                                        modifier = Modifier.size(18.dp)
+                                    )
+                                    Spacer(Modifier.width(8.dp))
+                                    Text(
+                                        text = if (permissionsStatus) "Ready" else "Fix Needed",
+                                        style = MaterialTheme.typography.labelLarge
                                     )
                                 }
                             }
@@ -93,7 +124,6 @@ class MainActivity : ComponentActivity() {
                         PermissionsScreen(
                             onClose = { 
                                 showPermissionsPage = false
-                                if (checkAllPermissions(context)) startTrebleService()
                             },
                             onRequestMic = { requestPermissionsLauncher.launch(arrayOf(Manifest.permission.RECORD_AUDIO)) },
                             onRequestNotifications = {

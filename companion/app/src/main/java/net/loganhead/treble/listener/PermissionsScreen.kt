@@ -7,19 +7,21 @@ import android.net.ConnectivityManager
 import android.net.NetworkCapabilities
 import android.os.Build
 import android.os.PowerManager
-import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.*
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.*
-import androidx.compose.runtime.Composable
+import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
 
 @Composable
 fun PermissionsScreen(
@@ -30,16 +32,40 @@ fun PermissionsScreen(
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
+    val lifecycleOwner = LocalLifecycleOwner.current
     
-    val micGranted = ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED
-    val notifGranted = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-        ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED
-    } else true
+    // Re-check permissions when the user returns to the app (e.g. from Settings or a dialog)
+    var refreshTrigger by remember { mutableIntStateOf(0) }
+    
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) {
+                refreshTrigger++
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose {
+            lifecycleOwner.lifecycle.removeObserver(observer)
+        }
+    }
+
+    val micGranted = remember(refreshTrigger) {
+        ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED
+    }
+    val notifGranted = remember(refreshTrigger) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED
+        } else true
+    }
     
     val powerManager = context.getSystemService(Context.POWER_SERVICE) as PowerManager
-    val batteryIgnored = powerManager.isIgnoringBatteryOptimizations(context.packageName)
+    val batteryIgnored = remember(refreshTrigger) {
+        powerManager.isIgnoringBatteryOptimizations(context.packageName)
+    }
     
-    val isInternetAvailable = isNetworkAvailable(context)
+    val isInternetAvailable = remember(refreshTrigger) {
+        isNetworkAvailable(context)
+    }
 
     val allReady = micGranted && notifGranted && batteryIgnored
 
@@ -52,7 +78,7 @@ fun PermissionsScreen(
             style = MaterialTheme.typography.headlineMedium
         )
         Text(
-            text = "Ensure all items are green for Treble to work correctly with your Pebble.",
+            text = "Ensure all items are green for Treble Listener to work correctly with your Pebble.",
             style = MaterialTheme.typography.bodyMedium
         )
 
@@ -66,7 +92,7 @@ fun PermissionsScreen(
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             PermissionItem(
                 title = "Notifications",
-                description = "Required for the background service.",
+                description = "Required for background microphone access.",
                 isGranted = notifGranted,
                 onGrant = onRequestNotifications
             )
@@ -74,14 +100,14 @@ fun PermissionsScreen(
 
         PermissionItem(
             title = "Always Active",
-            description = "Ignore battery optimizations to prevent the system from killing the listener.",
+            description = "Ignore battery optimizations to prevent service termination.",
             isGranted = batteryIgnored,
             onGrant = onRequestBattery
         )
 
         PermissionItem(
             title = "Internet Connection",
-            description = "Required for Shazam music identification.",
+            description = "Required to identify songs via Shazam.",
             isGranted = isInternetAvailable,
             onGrant = { /* No direct grant, just status */ },
             showButton = false
@@ -106,25 +132,10 @@ fun PermissionItem(
     onGrant: () -> Unit,
     showButton: Boolean = true
 ) {
-    val isDark = isSystemInDarkTheme()
-    
-    // Theme-aware colors for the status cards
-    val containerColor = if (isGranted) {
-        if (isDark) Color(0xFF1B5E20) else Color(0xFFE8F5E9)
-    } else {
-        if (isDark) Color(0xFF4E342E) else Color(0xFFFFF3E0)
-    }
-    val contentColor = if (isGranted) {
-        if (isDark) Color(0xFFC8E6C9) else Color(0xFF2E7D32)
-    } else {
-        if (isDark) Color(0xFFFFCCBC) else Color(0xFFE65100)
-    }
-
     Card(
         modifier = Modifier.fillMaxWidth(),
         colors = CardDefaults.cardColors(
-            containerColor = containerColor,
-            contentColor = contentColor
+            containerColor = MaterialTheme.colorScheme.surfaceVariant
         )
     ) {
         Row(
@@ -134,30 +145,75 @@ fun PermissionItem(
             Column(modifier = Modifier.weight(1f)) {
                 Text(
                     text = title, 
-                    style = MaterialTheme.typography.titleMedium,
-                    color = contentColor
+                    style = MaterialTheme.typography.titleMedium
                 )
                 Text(
                     text = description, 
                     style = MaterialTheme.typography.bodySmall,
-                    color = contentColor.copy(alpha = 0.8f)
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
+            
+            Spacer(modifier = Modifier.width(12.dp))
+
             if (isGranted) {
-                Icon(Icons.Default.CheckCircle, contentDescription = "Granted", tint = contentColor)
+                // "Ready" status indicator
+                Surface(
+                    shape = MaterialTheme.shapes.medium,
+                    color = Color(0xFF2E7D32), // High-contrast green
+                    contentColor = Color.White
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.CheckCircle,
+                            contentDescription = null,
+                            modifier = Modifier.size(18.dp)
+                        )
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text(text = "Ready", style = MaterialTheme.typography.labelLarge)
+                    }
+                }
             } else if (showButton) {
+                // "Fix Needed" button
                 Button(
                     onClick = onGrant,
-                    // Ensure button colors are explicitly using the theme's colors
                     colors = ButtonDefaults.buttonColors(
-                        containerColor = MaterialTheme.colorScheme.primary,
-                        contentColor = MaterialTheme.colorScheme.onPrimary
-                    )
+                        containerColor = MaterialTheme.colorScheme.error,
+                        contentColor = MaterialTheme.colorScheme.onError
+                    ),
+                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp)
                 ) {
-                    Text("Enable")
+                    Icon(
+                        imageVector = Icons.Default.Warning,
+                        contentDescription = null,
+                        modifier = Modifier.size(18.dp)
+                    )
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text(text = "Fix Needed", style = MaterialTheme.typography.labelLarge)
                 }
             } else {
-                Icon(Icons.Default.Warning, contentDescription = "Required", tint = contentColor)
+                // Status for items that don't have a direct "Fix" action
+                Surface(
+                    shape = MaterialTheme.shapes.medium,
+                    color = MaterialTheme.colorScheme.errorContainer,
+                    contentColor = MaterialTheme.colorScheme.onErrorContainer
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Warning,
+                            contentDescription = null,
+                            modifier = Modifier.size(18.dp)
+                        )
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text(text = "Required", style = MaterialTheme.typography.labelLarge)
+                    }
+                }
             }
         }
     }

@@ -10,6 +10,8 @@ import android.content.Intent
 import android.content.IntentFilter
 import android.content.pm.PackageManager
 import android.content.pm.ServiceInfo
+import android.net.ConnectivityManager
+import android.net.NetworkCapabilities
 import android.os.Build
 import android.os.IBinder
 import android.os.PowerManager
@@ -60,15 +62,20 @@ class TrebleService : Service() {
         // 1. Create the Notification Channel & Notification
         createNotificationChannel()
         val notification: Notification = NotificationCompat.Builder(this, channelId)
-            .setContentTitle("Ready to Listen")
+            .setContentTitle("Treble Listener")
             .setContentText("Awaiting commands from watchapp")
-            .setSmallIcon(android.R.drawable.ic_btn_speak_now)
+            .setSmallIcon(R.drawable.ic_listener_notification)
             .setOngoing(true)
+            .setShowWhen(false)
             .setPriority(NotificationCompat.PRIORITY_LOW)
             .build()
 
         // 2. Start Foreground
-        val foregroundType = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+        // On Android 14+, we can only use FOREGROUND_SERVICE_TYPE_MICROPHONE if we have the permission.
+        // If not, we start with 0 to at least keep the service alive to respond with "No Permissions".
+        val hasMicPermission = ContextCompat.checkSelfPermission(this, android.Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED
+        
+        val foregroundType = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R && hasMicPermission) {
             ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE
         } else {
             0
@@ -77,7 +84,12 @@ class TrebleService : Service() {
         try {
             ServiceCompat.startForeground(this, 1, notification, foregroundType)
         } catch (e: Exception) {
-            e.printStackTrace()
+            // Fallback for strict enforcement on newer Android versions
+            try {
+                ServiceCompat.startForeground(this, 1, notification, 0)
+            } catch (fallbackEx: Exception) {
+                fallbackEx.printStackTrace()
+            }
         }
 
         // 3. Register the Pebble Broadcast Receiver
@@ -107,10 +119,12 @@ class TrebleService : Service() {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        // Triggered by the "Force Service to Listen" button in the UI
+        // Triggered by the "Force Service to Listen" button in the UI or by Boot/Activity
         if (intent?.action == "ACTION_FORCE_RECOGNIZE") {
             handleRecognitionRequest()
         }
+        
+        // Ensure foreground state is maintained if restarted
         return START_STICKY
     }
 
@@ -161,6 +175,18 @@ class TrebleService : Service() {
         }
         
         return RES_SUCCESS
+    }
+
+    private fun isNetworkAvailable(context: Context): Boolean {
+        val connectivityManager = context.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
+        val network = connectivityManager.activeNetwork ?: return false
+        val activeNetwork = connectivityManager.getNetworkCapabilities(network) ?: return false
+        return when {
+            activeNetwork.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) -> true
+            activeNetwork.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR) -> true
+            activeNetwork.hasTransport(NetworkCapabilities.TRANSPORT_ETHERNET) -> true
+            else -> false
+        }
     }
 
     private fun sendReadyStatus() {

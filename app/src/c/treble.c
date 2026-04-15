@@ -17,7 +17,7 @@
 #define RES_NO_PERMS   3
 
 // Uncomment to simulate a successful recognition after 5 seconds (no phone needed)
-#define DEMO_MODE
+// #define DEMO_MODE
 
 #if defined(PBL_PLATFORM_EMERY) || defined(PBL_PLATFORM_GABBRO)
   #define PROMPT_FONT_KEY    FONT_KEY_GOTHIC_28_BOLD
@@ -94,6 +94,8 @@ static void send_recognition_request() {
 
 // --- Receiving Data from Android ---
 static void inbox_received_callback(DictionaryIterator *iterator, void *context) {
+  if (!listen_window_is_active()) return;
+
   Tuple *result_tuple = dict_find(iterator, KEY_RESPONSE_RESULT);
 
   if (result_tuple) {
@@ -245,6 +247,11 @@ static void init() {
   listen_window_set_demo_mode(true);
   history_window_set_demo_mode(true);
 #endif
+
+  if (launch_reason() == APP_LAUNCH_QUICK_LAUNCH) {
+    push_listen_window();
+    send_recognition_request();
+  }
 }
 
 static void deinit() {
