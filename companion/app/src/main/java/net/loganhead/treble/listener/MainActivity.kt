@@ -15,29 +15,23 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.lazy.rememberLazyListState
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.History
+import androidx.compose.material.icons.filled.Mic
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.platform.LocalLifecycleOwner
-import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.getpebble.android.kit.PebbleKit
 import net.loganhead.treble.listener.ui.theme.TrebleListenerTheme
 import java.util.UUID
@@ -46,12 +40,26 @@ class MainActivity : ComponentActivity() {
 
     private val appUuid = UUID.fromString("c49abd69-dd2c-4655-a7ce-ec7da67aa930")
     private val logMessages = mutableStateListOf<String>()
+    private val history = mutableStateListOf<HistoryEntry>()
+    private lateinit var historyManager: HistoryManager
 
     private val logReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context, intent: Intent) {
-            val message = intent.getStringExtra("message")
-            if (message != null) {
-                logMessages.add(message)
+            when (intent.action) {
+                "net.loganhead.treble.LOG_EVENT" -> {
+                    intent.getStringExtra("message")?.let { logMessages.add(it) }
+                }
+                "net.loganhead.treble.SONG_DETECTED" -> {
+                    val title = intent.getStringExtra("title") ?: "Unknown"
+                    val artist = intent.getStringExtra("artist") ?: "Unknown"
+                    val source = intent.getStringExtra("source") ?: "App"
+                    val timestamp = intent.getLongExtra("timestamp", System.currentTimeMillis())
+                    
+                    val entry = HistoryEntry(title, artist, timestamp, source)
+                    if (!history.contains(entry)) {
+                        history.add(0, entry)
+                    }
+                }
             }
         }
     }
@@ -59,7 +67,6 @@ class MainActivity : ComponentActivity() {
     private val requestPermissionsLauncher = registerForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
     ) { _ ->
-        // Ensure service refreshes its foreground state with new permissions
         startTrebleService()
     }
 
@@ -68,7 +75,8 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
 
-        // Initial service start
+        historyManager = HistoryManager(this)
+        loadHistory()
         startTrebleService()
 
         setContent {
@@ -76,13 +84,14 @@ class MainActivity : ComponentActivity() {
                 val context = LocalContext.current
                 val lifecycleOwner = LocalLifecycleOwner.current
                 var showPermissionsPage by remember { mutableStateOf(false) }
+                var selectedTab by remember { mutableIntStateOf(0) }
                 
-                // Track permission status reactively with lifecycle awareness
                 var refreshTrigger by remember { mutableIntStateOf(0) }
                 DisposableEffect(lifecycleOwner) {
                     val observer = LifecycleEventObserver { _, event ->
                         if (event == Lifecycle.Event.ON_RESUME) {
                             refreshTrigger++
+                            loadHistory()
                         }
                     }
                     lifecycleOwner.lifecycle.addObserver(observer)
@@ -91,8 +100,6 @@ class MainActivity : ComponentActivity() {
 
                 val permissionsStatus = remember(refreshTrigger) { checkAllPermissions(context) }
 
-                // Poke service whenever we return to the app or permissions change
-                // This ensures the foreground notification appears immediately after grants
                 LaunchedEffect(refreshTrigger) {
                     startTrebleService()
                 }
@@ -101,7 +108,7 @@ class MainActivity : ComponentActivity() {
                     modifier = Modifier.fillMaxSize(),
                     topBar = {
                         TopAppBar(
-                            title = { Text("Treble Listener") },
+                            title = { Text("Treble") },
                             actions = {
                                 Button(
                                     onClick = { showPermissionsPage = !showPermissionsPage },
@@ -132,13 +139,37 @@ class MainActivity : ComponentActivity() {
                                 }
                             }
                         )
+                    },
+                    bottomBar = {
+                        if (!showPermissionsPage) {
+                            NavigationBar {
+                                NavigationBarItem(
+                                    selected = selectedTab == 0,
+                                    onClick = { selectedTab = 0 },
+                                    icon = { Icon(Icons.Default.Mic, contentDescription = "Listen") },
+                                    label = { Text("Listen") }
+                                )
+                                NavigationBarItem(
+                                    selected = selectedTab == 1,
+                                    onClick = { selectedTab = 1 },
+                                    icon = { Icon(Icons.Default.History, contentDescription = "History") },
+                                    label = { Text("History") }
+                                )
+                                NavigationBarItem(
+                                    selected = selectedTab == 2,
+                                    onClick = { selectedTab = 2 },
+                                    icon = { Icon(Icons.Default.Settings, contentDescription = "Companion") },
+                                    label = { Text("Companion") }
+                                )
+                            }
+                        }
                     }
                 ) { innerPadding ->
                     if (showPermissionsPage) {
                         PermissionsScreen(
                             onClose = { 
                                 showPermissionsPage = false
-                                startTrebleService() // Poke service again when closing permissions
+                                startTrebleService()
                             },
                             onRequestMic = { requestPermissionsLauncher.launch(arrayOf(Manifest.permission.RECORD_AUDIO)) },
                             onRequestNotifications = {
@@ -155,21 +186,44 @@ class MainActivity : ComponentActivity() {
                             modifier = Modifier.padding(innerPadding)
                         )
                     } else {
-                        TrebleScreen(
-                            logMessages = logMessages,
-                            onLaunchClicked = { launchWatchApp() },
-                            onSimulateClicked = { forceServiceToListen() },
-                            modifier = Modifier.padding(innerPadding)
-                        )
+                        when (selectedTab) {
+                            0 -> ListenScreen(
+                                onListenClicked = { forceServiceToListen() },
+                                modifier = Modifier.padding(innerPadding)
+                            )
+                            1 -> HistoryScreen(
+                                history = history,
+                                modifier = Modifier.padding(innerPadding)
+                            )
+                            2 -> CompanionScreen(
+                                logMessages = logMessages,
+                                onLaunchClicked = { launchWatchApp() },
+                                onSimulateClicked = { forceServiceToListen() },
+                                modifier = Modifier.padding(innerPadding)
+                            )
+                        }
                     }
                 }
             }
         }
     }
 
+    private fun loadHistory() {
+        val savedHistory = historyManager.getHistory()
+        // Simple sync: if sizes differ or we want to be sure, refresh.
+        // For a better implementation, we'd use a Flow or LiveData.
+        if (savedHistory.size != history.size) {
+            history.clear()
+            history.addAll(savedHistory)
+        }
+    }
+
     override fun onResume() {
         super.onResume()
-        val filter = IntentFilter("net.loganhead.treble.LOG_EVENT")
+        val filter = IntentFilter().apply {
+            addAction("net.loganhead.treble.LOG_EVENT")
+            addAction("net.loganhead.treble.SONG_DETECTED")
+        }
         ContextCompat.registerReceiver(
             this,
             logReceiver,
@@ -214,74 +268,5 @@ class MainActivity : ComponentActivity() {
             action = "ACTION_FORCE_RECOGNIZE"
         }
         startService(intent)
-    }
-}
-
-@Composable
-fun TrebleScreen(
-    logMessages: List<String>,
-    onLaunchClicked: () -> Unit,
-    onSimulateClicked: () -> Unit,
-    modifier: Modifier = Modifier
-) {
-    Column(
-        modifier = modifier.fillMaxSize().padding(16.dp)
-    ) {
-        Button(
-            onClick = onLaunchClicked,
-            modifier = Modifier.fillMaxWidth()
-        ) {
-            Text("Open App on Watch")
-        }
-
-        Spacer(modifier = Modifier.height(8.dp))
-        Button(
-            onClick = onSimulateClicked,
-            modifier = Modifier.fillMaxWidth()
-        ) {
-            Text("Force Service to Listen (Test)")
-        }
-
-        Spacer(modifier = Modifier.height(24.dp))
-
-        Text(
-            text = "Activity Log",
-            style = MaterialTheme.typography.titleMedium,
-            modifier = Modifier.padding(bottom = 8.dp)
-        )
-
-        val listState = rememberLazyListState()
-        
-        // Auto-scroll to bottom when new messages arrive
-        LaunchedEffect(logMessages.size) {
-            if (logMessages.isNotEmpty()) {
-                listState.animateScrollToItem(logMessages.size - 1)
-            }
-        }
-
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .clip(RoundedCornerShape(8.dp))
-                .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f))
-                .border(1.dp, MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(8.dp))
-                .padding(8.dp)
-        ) {
-            LazyColumn(
-                state = listState,
-                modifier = Modifier.fillMaxSize()
-            ) {
-                items(logMessages) { message ->
-                    Text(
-                        text = message,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        fontFamily = FontFamily.Monospace,
-                        fontSize = 13.sp,
-                        lineHeight = 18.sp,
-                        modifier = Modifier.padding(vertical = 2.dp)
-                    )
-                }
-            }
-        }
     }
 }

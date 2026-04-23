@@ -54,11 +54,13 @@ class TrebleService : Service() {
     // Scope for background Shazam requests
     private val serviceScope = CoroutineScope(Dispatchers.Main + SupervisorJob())
     private lateinit var shazamManager: ShazamManager
+    private lateinit var historyManager: HistoryManager
 
     override fun onCreate() {
         super.onCreate()
 
         shazamManager = ShazamManager(this)
+        historyManager = HistoryManager(this)
 
         // 1. Create the Notification Channel
         createNotificationChannel()
@@ -74,7 +76,7 @@ class TrebleService : Service() {
                 val commandValue = dict.getInteger(KEY_COMMAND)
                 if (commandValue != null) {
                     when (commandValue.toInt()) {
-                        CMD_START_RECOGNITION -> handleRecognitionRequest()
+                        CMD_START_RECOGNITION -> handleRecognitionRequest(source = "Watch")
                         CMD_CHECK_READY -> sendReadyStatus()
                     }
                 }
@@ -99,7 +101,7 @@ class TrebleService : Service() {
         refreshForegroundStatus()
 
         if (intent?.action == "ACTION_FORCE_RECOGNIZE") {
-            handleRecognitionRequest()
+            handleRecognitionRequest(source = "App")
         }
         
         return START_STICKY
@@ -136,7 +138,7 @@ class TrebleService : Service() {
         }
     }
 
-    private fun handleRecognitionRequest() {
+    private fun handleRecognitionRequest(source: String) {
         val readiness = checkReadiness()
         if (readiness != RES_SUCCESS) {
             sendLogToActivity("Recognition blocked: Readiness status $readiness")
@@ -144,18 +146,35 @@ class TrebleService : Service() {
             return
         }
 
-        sendLogToActivity("Recognition requested. Listening...")
+        sendLogToActivity("Recognition requested ($source). Listening...")
 
         serviceScope.launch {
             val result = shazamManager.recognizeMusic()
             if (result.isSuccess) {
                 sendLogToActivity("Found: ${result.title} by ${result.artist}")
+                
+                // Save to history immediately
+                val timestamp = System.currentTimeMillis()
+                historyManager.addEntry(HistoryEntry(result.title, result.artist, timestamp, source))
+                
                 sendRecognitionResult(result.title, result.artist)
+                broadcastSongFound(result.title, result.artist, source, timestamp)
             } else {
                 sendLogToActivity("Failed: ${result.error}")
                 sendResponse(RES_FAILED)
             }
         }
+    }
+
+    private fun broadcastSongFound(title: String, artist: String, source: String, timestamp: Long) {
+        val intent = Intent("net.loganhead.treble.SONG_DETECTED").apply {
+            putExtra("title", title)
+            putExtra("artist", artist)
+            putExtra("source", source)
+            putExtra("timestamp", timestamp)
+            setPackage(packageName)
+        }
+        sendBroadcast(intent)
     }
 
     private fun checkReadiness(): Int {
