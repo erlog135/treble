@@ -83,7 +83,7 @@ static void response_timeout_callback(void *context) {
 static void auto_exit_timer_callback(void *context) {
   s_auto_exit_timer = NULL;
   // Exit to default watchface after 30 seconds of inactivity
-  app_exit_reason_set(APP_EXIT_ACTION_PERFORMED_SUCCESSFULLY);
+  exit_reason_set(APP_EXIT_ACTION_PERFORMED_SUCCESSFULLY);
   window_stack_remove(s_main_window, false);
 }
 

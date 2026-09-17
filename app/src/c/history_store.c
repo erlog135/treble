@@ -8,6 +8,28 @@ void history_store_add(const char *title, const char *artist) {
   int count = persist_exists(PERSIST_KEY_COUNT)
               ? persist_read_int(PERSIST_KEY_COUNT) : 0;
 
+  // Remove any existing record with the same title & artist so the newest
+  // entry will be the only copy and will appear at the most-recent position.
+  for (int i = 0; i < count; i++) {
+    SongRecord rec;
+    if (persist_read_data(PERSIST_KEY_BASE + i, &rec, sizeof(rec)) != sizeof(rec)) {
+      continue;
+    }
+    if (strncmp(rec.title,  title,  sizeof(rec.title))  == 0 &&
+        strncmp(rec.artist, artist, sizeof(rec.artist)) == 0) {
+      // Close the gap by shifting all records above this one down by one slot.
+      for (int j = i; j < count - 1; j++) {
+        SongRecord next;
+        if (persist_read_data(PERSIST_KEY_BASE + j + 1, &next, sizeof(next)) == sizeof(next)) {
+          persist_write_data(PERSIST_KEY_BASE + j, &next, sizeof(next));
+        }
+      }
+      count--;
+      persist_write_int(PERSIST_KEY_COUNT, count);
+      break; // titles are unique; no need to keep scanning
+    }
+  }
+
   // Shift existing records towards higher keys (older end).
   // If already at max, the oldest record at index MAX-1 is dropped.
   int shift_count = (count < HISTORY_MAX_SONGS) ? count : HISTORY_MAX_SONGS - 1;
