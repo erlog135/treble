@@ -33,13 +33,29 @@ fun HistoryScreen(
             Text("No songs found yet", style = MaterialTheme.typography.bodyLarge)
         }
     } else {
+        val grouped = history.sortedByDescending { it.timestamp }
+            .groupBy { entry ->
+                val date = Date(entry.timestamp)
+                SimpleDateFormat("EEEE, MMMM d", Locale.getDefault()).format(date)
+            }
+
         LazyColumn(
             modifier = modifier.fillMaxSize(),
             contentPadding = PaddingValues(16.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
-            items(history) { entry ->
-                HistoryItem(entry)
+            grouped.forEach { (date, entries) ->
+                item {
+                    Text(
+                        text = date,
+                        style = MaterialTheme.typography.titleSmall,
+                        color = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.padding(top = 8.dp, bottom = 4.dp)
+                    )
+                }
+                items(entries) { entry ->
+                    HistoryItem(entry)
+                }
             }
         }
     }
@@ -75,7 +91,7 @@ fun HistoryItem(entry: HistoryEntry) {
                     style = MaterialTheme.typography.bodyMedium
                 )
                 Text(
-                    text = SimpleDateFormat("MMM d, h:mm a", Locale.getDefault()).format(Date(entry.timestamp)),
+                    text = SimpleDateFormat("h:mm a", Locale.getDefault()).format(Date(entry.timestamp)),
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
