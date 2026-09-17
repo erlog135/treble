@@ -22,11 +22,7 @@ import androidx.core.content.ContextCompat
 import com.getpebble.android.kit.Constants
 import com.getpebble.android.kit.PebbleKit
 import com.getpebble.android.kit.util.PebbleDictionary
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.SupervisorJob
-import kotlinx.coroutines.cancel
-import kotlinx.coroutines.launch
+import kotlinx.coroutines.*
 import java.util.UUID
 
 class TrebleService : Service() {
@@ -53,6 +49,7 @@ class TrebleService : Service() {
 
     // Scope for background Shazam requests
     private val serviceScope = CoroutineScope(Dispatchers.Main + SupervisorJob())
+    private var recognitionJob: Job? = null
     private lateinit var shazamManager: ShazamManager
     private lateinit var historyManager: HistoryManager
 
@@ -100,8 +97,9 @@ class TrebleService : Service() {
         // notification appears and the foreground type is correctly updated.
         refreshForegroundStatus()
 
-        if (intent?.action == "ACTION_FORCE_RECOGNIZE") {
-            handleRecognitionRequest(source = "App")
+        when (intent?.action) {
+            "ACTION_FORCE_RECOGNIZE" -> handleRecognitionRequest(source = "App")
+            "ACTION_STOP_RECOGNIZE" -> stopRecognition()
         }
         
         return START_STICKY
@@ -146,24 +144,48 @@ class TrebleService : Service() {
             return
         }
 
-        sendLogToActivity("Recognition requested ($source). Listening...")
+        // Cancel any existing job
+        recognitionJob?.cancel()
 
-        serviceScope.launch {
+        sendLogToActivity("Recognition requested ($source). Listening...")
+        broadcastState("LISTENING")
+
+        recognitionJob = serviceScope.launch {
             val result = shazamManager.recognizeMusic()
-            if (result.isSuccess) {
-                sendLogToActivity("Found: ${result.title} by ${result.artist}")
-                
-                // Save to history immediately
-                val timestamp = System.currentTimeMillis()
-                historyManager.addEntry(HistoryEntry(result.title, result.artist, timestamp, source))
-                
-                sendRecognitionResult(result.title, result.artist)
-                broadcastSongFound(result.title, result.artist, source, timestamp)
-            } else {
-                sendLogToActivity("Failed: ${result.error}")
-                sendResponse(RES_FAILED)
+            if (isActive) {
+                if (result.isSuccess) {
+                    sendLogToActivity("Found: ${result.title} by ${result.artist}")
+                    
+                    // Save to history immediately
+                    val timestamp = System.currentTimeMillis()
+                    historyManager.addEntry(HistoryEntry(result.title, result.artist, timestamp, source))
+                    
+                    sendRecognitionResult(result.title, result.artist)
+                    broadcastSongFound(result.title, result.artist, source, timestamp)
+                    broadcastState("IDLE")
+                } else {
+                    sendLogToActivity("Failed: ${result.error}")
+                    sendResponse(RES_FAILED)
+                    broadcastState("ERROR", result.error)
+                }
             }
         }
+    }
+
+    private fun stopRecognition() {
+        recognitionJob?.cancel()
+        recognitionJob = null
+        sendLogToActivity("Recognition stopped by user.")
+        broadcastState("IDLE")
+    }
+
+    private fun broadcastState(state: String, error: String? = null) {
+        val intent = Intent("net.loganhead.treble.STATE_CHANGED").apply {
+            putExtra("state", state)
+            error?.let { putExtra("error", it) }
+            setPackage(packageName)
+        }
+        sendBroadcast(intent)
     }
 
     private fun broadcastSongFound(title: String, artist: String, source: String, timestamp: Long) {

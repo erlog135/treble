@@ -32,7 +32,11 @@ import androidx.core.content.ContextCompat
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
+import androidx.lifecycle.lifecycleScope
 import com.getpebble.android.kit.PebbleKit
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import net.loganhead.treble.listener.ui.theme.TrebleListenerTheme
 import java.util.UUID
 
@@ -41,6 +45,10 @@ class MainActivity : ComponentActivity() {
     private val appUuid = UUID.fromString("c49abd69-dd2c-4655-a7ce-ec7da67aa930")
     private val logMessages = mutableStateListOf<String>()
     private val history = mutableStateListOf<HistoryEntry>()
+    private var listeningState by mutableStateOf("IDLE")
+    private var lastError by mutableStateOf<String?>(null)
+    private var recentSong by mutableStateOf<HistoryEntry?>(null)
+    private var resetJob: Job? = null
     private lateinit var historyManager: HistoryManager
 
     private val logReceiver = object : BroadcastReceiver() {
@@ -58,6 +66,21 @@ class MainActivity : ComponentActivity() {
                     val entry = HistoryEntry(title, artist, timestamp, source)
                     if (!history.contains(entry)) {
                         history.add(0, entry)
+                    }
+                    recentSong = entry
+                    lastError = null
+                    startResetTimer()
+                }
+                "net.loganhead.treble.STATE_CHANGED" -> {
+                    listeningState = intent.getStringExtra("state") ?: "IDLE"
+                    val error = intent.getStringExtra("error")
+                    if (error != null) {
+                        lastError = error
+                        recentSong = null
+                        startResetTimer()
+                    }
+                    if (listeningState == "LISTENING") {
+                        resetJob?.cancel()
                     }
                 }
             }
@@ -92,6 +115,7 @@ class MainActivity : ComponentActivity() {
                         if (event == Lifecycle.Event.ON_RESUME) {
                             refreshTrigger++
                             loadHistory()
+                            resetTransientState()
                         }
                     }
                     lifecycleOwner.lifecycle.addObserver(observer)
@@ -188,7 +212,11 @@ class MainActivity : ComponentActivity() {
                     } else {
                         when (selectedTab) {
                             0 -> ListenScreen(
+                                isListening = listeningState == "LISTENING",
+                                lastError = lastError,
+                                lastSong = recentSong,
                                 onListenClicked = { forceServiceToListen() },
+                                onStopClicked = { stopServiceListening() },
                                 modifier = Modifier.padding(innerPadding)
                             )
                             1 -> HistoryScreen(
@@ -210,11 +238,22 @@ class MainActivity : ComponentActivity() {
 
     private fun loadHistory() {
         val savedHistory = historyManager.getHistory()
-        // Simple sync: if sizes differ or we want to be sure, refresh.
-        // For a better implementation, we'd use a Flow or LiveData.
         if (savedHistory.size != history.size) {
             history.clear()
             history.addAll(savedHistory)
+        }
+    }
+
+    private fun resetTransientState() {
+        lastError = null
+        recentSong = null
+    }
+
+    private fun startResetTimer() {
+        resetJob?.cancel()
+        resetJob = lifecycleScope.launch {
+            delay(15000)
+            resetTransientState()
         }
     }
 
@@ -223,6 +262,7 @@ class MainActivity : ComponentActivity() {
         val filter = IntentFilter().apply {
             addAction("net.loganhead.treble.LOG_EVENT")
             addAction("net.loganhead.treble.SONG_DETECTED")
+            addAction("net.loganhead.treble.STATE_CHANGED")
         }
         ContextCompat.registerReceiver(
             this,
@@ -266,6 +306,13 @@ class MainActivity : ComponentActivity() {
     private fun forceServiceToListen() {
         val intent = Intent(this, TrebleService::class.java).apply {
             action = "ACTION_FORCE_RECOGNIZE"
+        }
+        startService(intent)
+    }
+
+    private fun stopServiceListening() {
+        val intent = Intent(this, TrebleService::class.java).apply {
+            action = "ACTION_STOP_RECOGNIZE"
         }
         startService(intent)
     }
