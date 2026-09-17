@@ -31,6 +31,7 @@
 #define PDC_TOP_OFFSET  24  // pixels above screen center
 
 static AppTimer *s_response_timer;
+static AppTimer *s_auto_exit_timer;
 
 static Window *s_main_window;
 static StatusBarLayer *s_status_bar;
@@ -75,7 +76,15 @@ static void demo_timer_callback(void *context) {
 
 static void response_timeout_callback(void *context) {
   s_response_timer = NULL;
+  if (!listen_window_is_active()) return;
   message_dialog_push(RES_NO_APP);
+}
+
+static void auto_exit_timer_callback(void *context) {
+  s_auto_exit_timer = NULL;
+  // Exit to default watchface after 30 seconds of inactivity
+  app_exit_reason_set(APP_EXIT_ACTION_PERFORMED_SUCCESSFULLY);
+  window_stack_remove(s_main_window, false);
 }
 
 static void cancel_response_timer() {
@@ -83,6 +92,24 @@ static void cancel_response_timer() {
     app_timer_cancel(s_response_timer);
     s_response_timer = NULL;
   }
+}
+
+static void cancel_auto_exit_timer() {
+  if (s_auto_exit_timer) {
+    app_timer_cancel(s_auto_exit_timer);
+    s_auto_exit_timer = NULL;
+  }
+}
+
+static void main_window_appear(Window *window) {
+  // Reset the 30-second idle timer every time the main window comes into view
+  cancel_auto_exit_timer();
+  s_auto_exit_timer = app_timer_register(30000, auto_exit_timer_callback, NULL);
+}
+
+static void main_window_disappear(Window *window) {
+  // User navigated away — no need to auto-exit while another window is active
+  cancel_auto_exit_timer();
 }
 
 // --- Sending Data to Android ---
@@ -142,7 +169,7 @@ static void inbox_dropped_callback(AppMessageResult reason, void *context) {
 static void outbox_failed_callback(DictionaryIterator *iterator, AppMessageResult reason, void *context) {
   APP_LOG(APP_LOG_LEVEL_ERROR, "Outbox send failed! Reason: %d", (int)reason);
   cancel_response_timer();
-  if (reason) {
+  if (reason && listen_window_is_active()) {
     message_dialog_push(RES_NO_APP);
   }
 }
@@ -251,6 +278,8 @@ static void init() {
   window_set_window_handlers(s_main_window, (WindowHandlers) {
     .load = main_window_load,
     .unload = main_window_unload,
+    .appear = main_window_appear,
+    .disappear = main_window_disappear,
   });
 
   window_set_background_color(s_main_window, PBL_IF_COLOR_ELSE(GColorFolly, GColorWhite));
@@ -266,6 +295,8 @@ static void init() {
   listen_window_set_demo_mode(true);
   history_window_set_demo_mode(true);
 #endif
+
+
 
   if (launch_reason() == APP_LAUNCH_QUICK_LAUNCH) {
     push_listen_window();

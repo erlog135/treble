@@ -240,6 +240,7 @@ void listen_window_on_result(const char *title, const char *artist) {
 }
 
 void listen_window_on_not_found(void) {
+  if (!listen_window_is_active()) return;
   if (!s_demo_mode) vibes_long_pulse();
   push_notfound_window(s_listen_window);
 }
