@@ -127,21 +127,36 @@ class TrebleService : Service() {
             .setContentIntent(pendingIntent)
             .build()
 
-        // On Android 14+, we can only use FOREGROUND_SERVICE_TYPE_MICROPHONE if we have the permission.
-        val hasMicPermission = ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED
-        
-        val foregroundType = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R && hasMicPermission) {
-            ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE
-        } else {
-            0
+        // Determine the correct foreground service type:
+        // - API 34+ (Android 14+): FOREGROUND_SERVICE_TYPE_MICROPHONE if permission granted,
+        //   otherwise FOREGROUND_SERVICE_TYPE_SHORT_SERVICE (type 0 is rejected on API 34+).
+        // - API 30–33 (Android 11–13): FOREGROUND_SERVICE_TYPE_MICROPHONE if permission granted,
+        //   otherwise 0 (FOREGROUND_SERVICE_TYPE_NONE) which is still valid on these versions.
+        // - Below API 30: type is ignored entirely, pass 0.
+        val hasMicPermission = ContextCompat.checkSelfPermission(
+            this, Manifest.permission.RECORD_AUDIO
+        ) == PackageManager.PERMISSION_GRANTED
+
+        val foregroundType = when {
+            Build.VERSION.SDK_INT >= Build.VERSION_CODES.R && hasMicPermission ->
+                ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE
+            Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE ->
+                // Android 14+: type 0 is invalid; SHORT_SERVICE is the safe fallback
+                ServiceInfo.FOREGROUND_SERVICE_TYPE_SHORT_SERVICE
+            else -> 0
         }
 
         try {
             ServiceCompat.startForeground(this, 1, notification, foregroundType)
         } catch (e: Exception) {
-            // Fallback for cases where specific type might still fail (e.g. missing other reqs)
+            // Last-resort fallback: try SHORT_SERVICE if the primary type was rejected
+            val fallbackType = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+                ServiceInfo.FOREGROUND_SERVICE_TYPE_SHORT_SERVICE
+            } else {
+                0
+            }
             try {
-                ServiceCompat.startForeground(this, 1, notification, 0)
+                ServiceCompat.startForeground(this, 1, notification, fallbackType)
             } catch (fallbackEx: Exception) {
                 fallbackEx.printStackTrace()
             }
