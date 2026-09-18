@@ -15,10 +15,10 @@ class BootReceiver : BroadcastReceiver() {
         if (intent.action == Intent.ACTION_BOOT_COMPLETED || 
             intent.action == "android.intent.action.QUICKBOOT_POWERON") {
             
-            // 1. Post an important notification to the user
+            // 1. Always post the notification to the user upon boot
             showBootNotification(context)
 
-            // 2. Still attempt to start the service automatically
+            // 2. Attempt to start the service automatically
             val serviceIntent = Intent(context, TrebleService::class.java)
             try {
                 ContextCompat.startForegroundService(context, serviceIntent)
@@ -58,7 +58,7 @@ class BootReceiver : BroadcastReceiver() {
         val notification = NotificationCompat.Builder(context, channelId)
             .setSmallIcon(R.drawable.ic_listener_notification)
             .setContentTitle("Treble Listener")
-            .setContentText("Device restarted. Open the app to re-enable background access.")
+            .setContentText("Restart detected. Open the app to re-enable background access.")
             .setPriority(NotificationCompat.PRIORITY_HIGH)
             .setCategory(NotificationCompat.CATEGORY_REMINDER)
             .setAutoCancel(true)

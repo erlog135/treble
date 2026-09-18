@@ -1,6 +1,7 @@
 package net.loganhead.treble.listener
 
 import android.Manifest
+import android.app.NotificationManager
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
@@ -97,6 +98,9 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
+
+        // Clear the boot alert notification if it exists
+        clearBootNotification()
 
         historyManager = HistoryManager(this)
         loadHistory()
@@ -259,6 +263,7 @@ class MainActivity : ComponentActivity() {
 
     override fun onResume() {
         super.onResume()
+        clearBootNotification()
         val filter = IntentFilter().apply {
             addAction("net.loganhead.treble.LOG_EVENT")
             addAction("net.loganhead.treble.SONG_DETECTED")
@@ -275,6 +280,11 @@ class MainActivity : ComponentActivity() {
     override fun onPause() {
         super.onPause()
         unregisterReceiver(logReceiver)
+    }
+
+    private fun clearBootNotification() {
+        val notificationManager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+        notificationManager.cancel(1001) // Matches ID in BootReceiver
     }
 
     private fun checkAllPermissions(context: Context): Boolean {
